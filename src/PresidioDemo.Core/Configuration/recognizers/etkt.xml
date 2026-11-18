@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ETKT recognizers in the Presidio-style format (WR-014): a flat list under <recognizers> that mirrors Presidio's
+  recognizer registry YAML, its analyze allow_list and its anonymizers map, using Presidio's names.
+  Each decoded string is decided on its own: a string that matches an <allow_list> item end to end is published
+  unchanged; otherwise every span detected at or above default_score_threshold gets its entity's <anonymizer>, else
+  DEFAULT, else Presidio's replace; a string in which nothing is detected is published unchanged and listed for review.
+  Every result keeps the string's width (WR-015). Values below are made up.
+-->
+<recognizers feed="ETKT" language="en" default_score_threshold="0.5">
+
+  <!-- ===== Predefined recognizers (Presidio's own). All of them run unless switched off by class name, for example:
+       <recognizer name="CryptoRecognizer" type="predefined" enabled="false" />  ===== -->
+
+  <!-- ===== Custom pattern recognizers (Presidio type: custom). ===== -->
+
+  <!-- Example: 0161234567890 (13 digits) -> *************. -->
+  <recognizer name="ticketNumber" type="custom" supported_entity="TICKET_REFERENCE">
+    <pattern name="13 to 15 digits" score="0.85">^\d{13,15}$</pattern>
+  </recognizer>
+
+  <!-- The eight-character reference prefix that opens the ticket status record. -->
+  <!-- Example: in 12A34567,ISSUED, 12A34567 -> ********; the rest of the record is published unchanged. -->
+  <recognizer name="statusPrefix" type="custom" supported_entity="UNCLASSIFIED_IDENTIFIER">
+    <pattern name="status record prefix" score="0.85">^\d{2}[A-Z0-9]\d{5}(?=,|$)</pattern>
+  </recognizer>
+
+  <!-- Example: MILLER/JORDAN -> *************. Presidio's PERSON misses this format. -->
+  <recognizer name="passengerName" type="custom" supported_entity="PERSON">
+    <pattern name="surname/given" score="0.9">(?&lt;![A-Z])[A-Z]{2,}(?:[ '-][A-Z]+)*/[A-Z]*(?:[ '-][A-Z]+)*</pattern>
+  </recognizer>
+
+  <!-- ===== Allow list: a decoded string that matches an item end to end is published unchanged. ===== -->
+  <!-- Examples: 09NOV26 (entry date); 1405 or flight 0117 (a four-digit sign-in number has the same shape and is
+       published unchanged too, an approved exception in tests/fixtures/parity-exceptions.json); 1405P, or 905A with a
+       leading space (flight time); A1B2C3 (terminal address). -->
+  <allow_list match="regex">
+    <item>^\d{2}[A-Z]{3}\d{2}$</item>
+    <item>^\d{4}$</item>
+    <item>^ ?\d{3,4}[APNM]$</item>
+    <item>^[A-Z]\d[A-Z0-9]{4}$</item>
+  </allow_list>
+
+  <!-- ===== Anonymizers (Presidio anonymizers map): one action per entity. ===== -->
+  <!-- Allowed types: mask, replace, redact, hash, keep; every result is fitted to the width it replaces (WR-015). -->
+  <anonymizer entity="PERSON" type="mask" masking_char="*" />
+  <anonymizer entity="TICKET_REFERENCE" type="mask" masking_char="*" />
+  <anonymizer entity="UNCLASSIFIED_IDENTIFIER" type="mask" masking_char="*" />
+  <!-- Every other entity, including Presidio's EMAIL_ADDRESS, IP_ADDRESS, CREDIT_CARD and LOCATION.
+       Without this line Presidio's default applies: replace with <ENTITY>. -->
+  <anonymizer entity="DEFAULT" type="mask" masking_char="*" />
+
+</recognizers>
