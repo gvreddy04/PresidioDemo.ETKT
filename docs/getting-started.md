@@ -1,7 +1,7 @@
 # Getting started: set up and test PresidioDemo on Windows
 
 This guide takes a new developer from a clean Windows PC to a running feed worker that reads airline feed messages
-from a local Solace broker in Docker, protects personal data with Presidio, and publishes the protected copy. It
+from a local Solace broker in Docker, protects passenger names with Presidio, and publishes the protected copy. It
 ends with testing the queue messages.
 
 Every step is a PowerShell block to copy and run, followed by **You should see**, so you can confirm it worked
@@ -204,13 +204,13 @@ if ($failed.Count -eq 0) { Write-Host "All .NET checks passed." -ForegroundColor
 **You should see:** `All .NET checks passed.` `Messaging.ContractTests` prints `SKIP Solace contract ...` here; it
 runs against the broker in step 20.
 
-**Python unit tests** (38 tests, about 1–2 minutes; they load Presidio):
+**Python unit tests** (47 tests, about 1–2 minutes; they load Presidio):
 
 ```powershell
 src\.venv\Scripts\python -m unittest discover -s tests/unit-tests
 ```
 
-**You should see:** `Ran 42 tests` and `OK`.
+**You should see:** `Ran 47 tests` and `OK`.
 
 **End-to-end sample check.** This sends all six files in `docs/sample-docs/ETKT` through the real feed worker and
 embedded Presidio, over the in-memory broker:
@@ -219,8 +219,9 @@ embedded Presidio, over the in-memory broker:
 src\.venv\Scripts\python tests/run_sample_verification.py
 ```
 
-**You should see:** `"Published": 6` and `"all_checks_passed": true`. No ETKT negative sample is supplied, so
-nothing is rejected.
+**You should see:** `"Published": 6` and `"all_checks_passed": true`, with `"names_in_scope": 0` and
+`"out_of_scope": 30`: the check is names-only and the ETKT baseline holds no name, so it passes with 0 names in
+scope. No ETKT negative sample is supplied, so nothing is rejected.
 
 Test output goes to `.test-runs\` (git-ignored). Some files there contain the original, unprotected sample data;
 never copy them elsewhere.
@@ -327,6 +328,7 @@ PRESIDIO FEED WORKER | environment Local | Ctrl+C or SIGTERM stops after the cur
 info: ...SolaceConnection[0] Provisioned 2 Solace queues on the local broker.
 info: ...SolaceConnection[0] Connected to Solace tcp://localhost:55555 (VPN default) as presidio-worker-local.
 info: ...FeedWorkerService[0] Initializing embedded local Presidio and the bundled NLP model...
+info: ...FeedWorkerService[0] Default detection off (Presidio:DefaultDetection=false): only the recognizers each feed's file defines act.
 info: ...Worker.ETKT[0] ETKT worker reading q.etkt.raw; output airline/etkt/protected; dead letter q.etkt.dlq.
 info: ...FeedWorkerService[0] READY: 1 feed workers on Solace.
 ```
@@ -550,10 +552,12 @@ environment's section, then environment variables (`__` separates levels). Set a
 |---|---|
 | `$env:Messaging__Feed = "ETKT"` | The worker consumes only the ETKT feed |
 | `$env:Messaging__ConsumersPerTask = "4"` | 4 consumers per input queue (1–32) |
+| `$env:Presidio__DefaultDetection = "true"` | Presidio's predefined recognizers (email, phone, card, spaCy names and the rest) run beside the passenger-name recognizer; off by default |
 | `$env:Logging__LogLevel__Default = "Warning"` | Only warnings and errors, such as dead letters |
 
-The feed protection rules are in `src/PresidioDemo.Core/Configuration/` (`feed-policies.xml`, `xdr-layouts.xml`,
-`reference-layouts.xml`). The build copies them next to the worker.
+The feed protection rules are in `src/PresidioDemo.Core/Configuration/recognizers/etkt.xml`. It keeps passenger names
+only (the `passengerName` recognizer); with `Presidio:DefaultDetection` off, the default, nothing else is detected.
+The build copies it next to the worker.
 
 ## Troubleshooting
 

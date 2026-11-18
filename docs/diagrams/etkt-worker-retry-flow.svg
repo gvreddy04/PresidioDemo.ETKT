@@ -121,7 +121,7 @@ text{font-family:'Segoe UI',Arial,sans-serif;fill:#2C2C2A}
 <use href="#q" x="1304" y="160" width="20" height="14"/>
 <text class="t" x="1332" y="172">ETKT (PII &amp; PCI clean)</text>
 <text class="m" x="1304" y="194">Output queue</text>
-<text class="d" x="1304" y="218">Ticket and prefix masked</text>
+<text class="d" x="1304" y="218">Passenger names masked</text>
 <text class="d" x="1304" y="238">Status and terminal unchanged</text></g>
 <g class="st"><rect x="1290" y="320" width="280" height="70" rx="8" style="stroke:#534AB7"/>
 <text class="t" x="1430" y="350" text-anchor="middle">Partner core system</text>
