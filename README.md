@@ -1,8 +1,8 @@
 # Presidio Feed Protection Demo
 
-Process the airline PNR feed from a message broker by decoding each message generically and detecting personal data with local Presidio and the feed's recognizer formats. PNR stays unchanged. Output is validated and confirmed by the broker before the input is acknowledged; rejected input goes to the feed's restricted dead-letter queue.
+Process the airline ETKT (electronic ticket) feed from a message broker by decoding each message generically and detecting personal data with local Presidio and the feed's recognizer formats. Output is validated and confirmed by the broker before the input is acknowledged; rejected input goes to the feed's restricted dead-letter queue.
 
-This branch (`PNR-Worker`) runs the PNR feed only.
+This worker runs the ETKT feed only.
 
 ## Solution organization
 
@@ -12,11 +12,11 @@ The solution separates feed processing from messaging. Broker-specific code live
 PresidioDemo.slnx
 ├── src/
 │   ├── PresidioDemo.Core/              feed, decoder, detection, pipeline (no broker code)
-│   │   ├── Configuration/recognizers/  pnr.xml
-│   │   ├── Decoder/                    XdrFeedDecoder + PnrDecoder; XdrTextScanner
-│   │   ├── Logging/                    FeedLogger + PnrFeedLogger, FeedTransactionLog, DetectionLog
+│   │   ├── Configuration/recognizers/  etkt.xml
+│   │   ├── Decoder/                    XdrFeedDecoder + EtktDecoder; XdrTextScanner
+│   │   ├── Logging/                    FeedLogger + EtktFeedLogger, FeedTransactionLog, DetectionLog
 │   │   ├── Models/                     FeedContracts, FeedFormats, FeedFileRouting
-│   │   ├── Pipeline/                   ProtectedFeedWorkflow + PnrWorkflow, FeedWorkflowRouter, codec registry, FeedMessageProcessor
+│   │   ├── Pipeline/                   ProtectedFeedWorkflow + EtktWorkflow, FeedWorkflowRouter, codec registry, FeedMessageProcessor
 │   │   └── Protection/                 recognizer configuration, detecting protector, python/presidio_demo.py
 │   ├── PresidioDemo.Messaging/         broker-neutral ports and models (no broker package)
 │   │   ├── Abstractions/               IMessagingConnection, IMessageConsumer, IMessagePublisher
@@ -27,7 +27,7 @@ PresidioDemo.slnx
 │   │   ├── Publisher/                  SolaceMessagePublisher (persistent publish, waits for confirmation)
 │   │   ├── Models/                     SolaceMessageMapper (native message <-> broker-neutral records)
 │   │   └── SolaceMessaging.cs          AddSolaceMessaging registration
-│   └── PresidioDemo.Worker/            the deployable: Generic Host, appsettings.json, one FeedWorker for the PNR route
+│   └── PresidioDemo.Worker/            the deployable: Generic Host, appsettings.json, one FeedWorker for the ETKT route
 │       ├── Hosting/                    EnvironmentConfiguration, MessagingTransports, PresidioOptions
 │       └── Pipeline/                   FeedWorker, FeedWorkerService
 ├── tests/
@@ -48,13 +48,13 @@ PresidioDemo.slnx
     └── .env.dev.example                Dev values to copy into the git-ignored deploy/.env.dev
 ```
 
-Project references point inward only: Worker → Core, Messaging and the adapters; adapters → Messaging. Core never references messaging, and Messaging never references a broker. Concern folders are flat: each holds a base class and the PNR feed's sealed child where the feed needs one, and every namespace is the project plus its folder (for example `PresidioDemo.Core.Decoder`, `PresidioDemo.Messaging.Solace.Connection`, `PresidioDemo.Worker.Hosting`); `test_project_layout.py` checks both. The Python environment stays at `src/.venv`; the container image uses `/opt/venv` through `Presidio:PythonEnvironment`.
+Project references point inward only: Worker → Core, Messaging and the adapters; adapters → Messaging. Core never references messaging, and Messaging never references a broker. Concern folders are flat: each holds a base class and the ETKT feed's sealed child where the feed needs one, and every namespace is the project plus its folder (for example `PresidioDemo.Core.Decoder`, `PresidioDemo.Messaging.Solace.Connection`, `PresidioDemo.Worker.Hosting`); `test_project_layout.py` checks both. The Python environment stays at `src/.venv`; the container image uses `/opt/venv` through `Presidio:PythonEnvironment`.
 
 ![Feed protection workflow](docs/diagrams/presidio-feed-workflow.svg)
 
 ## Messaging design
 
-The worker runs one `FeedWorker` for the PNR route. Each message goes through the same steps on every broker:
+The worker runs one `FeedWorker` for the ETKT route. Each message goes through the same steps on every broker:
 
 1. **Receive** from the feed's input queue (`IMessageConsumer`). The broker sends the next message only after this one is acknowledged, so each consumer has one active message.
 2. **Process** with `FeedMessageProcessor` (Core): decode, detect and protect with local Presidio, rebuild and validate.
@@ -94,7 +94,7 @@ Nothing in Core, the feed code, the worker or the route changes.
 All settings are in one file, [src/PresidioDemo.Worker/appsettings.json](src/PresidioDemo.Worker/appsettings.json):
 
 - **Shared settings** at the top: `Messaging` (transport and delivery limits), `Presidio` (`RecognizerDirectory`, `DetectionLog` and an optional `PythonEnvironment` folder) and `Logging`.
-- **`Environments`**: one section per environment, holding only what differs, including its `Messaging:Routes` (`Feed`, `Input`, `Output` and `DeadLetter`). Today these are `Local` (local broker) and `Dev`; each routes the PNR feed only, as route 0. Adding `QA`, `UAT` or `Prod` means adding one more block.
+- **`Environments`**: one section per environment, holding only what differs, including its `Messaging:Routes` (`Feed`, `Input`, `Output` and `DeadLetter`). Today these are `Local` (local broker) and `Dev`; each routes the ETKT feed only, as route 0 (in `Dev`, the `TKT` queue). Adding `QA`, `UAT` or `Prod` means adding one more block.
 - **`CurrentEnvironment`**: the default when nothing else selects one (`Local`, for developer machines).
 
 The `DOTNET_ENVIRONMENT` variable selects the environment; if it isn't set, `CurrentEnvironment` in the file applies. On AWS, each environment's ECS task definition (or EKS pod spec) sets `DOTNET_ENVIRONMENT` (for example `QA`), so the same image runs everywhere. Values are applied in this order, with later ones winning: shared settings, then the selected environment's section, then environment variables with double underscores (for example `Solace__Host` or `Messaging__Routes__0__Input`). The `Dev` section holds DemoAir stand-in names only; the real broker, VPN, user and queue names are supplied through environment variables at deploy time and are never committed.
@@ -106,13 +106,13 @@ Startup stops with one clear message for any of these:
 - unknown sections or keys
 - a password in the file
 - an HTTP host, or `tcps://` without certificate validation
-- a route for a feed this build does not support, a feed with more than one route, or shared or wildcard destinations. Settings written for a build with more feeds stop startup with, for example, `Messaging:Routes:0 names feed 'TKT', which this build does not support.`
+- a route for a feed this build does not support, a feed with more than one route, or shared or wildcard destinations. Settings written for a build with more feeds stop startup with, for example, `Messaging:Routes:0 names feed 'ACI', which this build does not support.`
 - a `Presidio:PythonEnvironment` folder without `pyvenv.cfg`
 - an invalid or missing recognizer file (`Presidio:RecognizerDirectory`)
 
 `Solace:ProvisionQueues` creates the input and dead-letter queues and is enabled only for `Local`; other environments use queues provisioned by the broker team.
 
-**One feed per service.** `Messaging:Feed` (for example `Messaging__Feed=PNR` in a task definition) makes the process consume only that feed's route, so the feed runs as its own ECS service and scales on its own. When it is empty, the process runs every routed feed. A value without a route stops startup.
+**One feed per service.** `Messaging:Feed` (for example `Messaging__Feed=ETKT` in a task definition) makes the process consume only that feed's route, so the feed runs as its own ECS service and scales on its own. When it is empty, the process runs every routed feed. A value without a route stops startup.
 
 **Parallel consumers.** `Messaging:ConsumersPerTask` (1 by default, at most 32) opens that many consumers on the routed input queue. All of them share the task's one broker connection. Each consumer reads one message at a time, so broker round trips overlap while Python calls stay serialized. On a partitioned queue, the broker assigns partitions to each consumer, which keeps the order for each partition key. On an exclusive queue, such as the queue the Local broker provisions, the extra consumers wait as hot standby and add no throughput. Set it per task definition, for example `Messaging__ConsumersPerTask=8`, once the feed's queue is partitioned.
 
@@ -120,55 +120,54 @@ Startup stops with one clear message for any of these:
 
 ## Architecture diagrams
 
-- [PII infrastructure on AWS](docs/diagrams/aws-pii-infrastructure.svg): proposed dev environment with a Solace broker, an exclusive input queue for the PNR feed and acknowledgment after publish.
-- [AWS deployment, one ECS service for the PNR feed](docs/diagrams/aws-solace-ecs-deployment.svg): a generic view of the Harness build and deploy, the Solace broker in AWS, the input queue and DLQ, the PNR worker with parallel consumers and auto scaling, the protected topic with output queues for downstream consumers, and the failed-message and broker backstop paths. Specific values are in [docs/aws-deployment-plan.md](docs/aws-deployment-plan.md).
-- [Dead-letter queues](docs/diagrams/pii-feeds-dead-letter-queues.svg): the PNR input queue, its restricted dead-letter queue and who may read it.
-- [PNR worker retry flow](docs/diagrams/pnr-worker-retry-flow.svg): redelivery, publish retries and dead-lettering for the PNR worker.
+- [PII infrastructure on AWS](docs/diagrams/aws-pii-infrastructure.svg): proposed dev environment with a Solace broker, an exclusive input queue for the ETKT feed and acknowledgment after publish.
+- [AWS deployment, one ECS service for the ETKT feed](docs/diagrams/aws-solace-ecs-deployment.svg): a generic view of the Harness build and deploy, the Solace broker in AWS, the input queue and DLQ, the ETKT worker with parallel consumers and auto scaling, the protected topic with output queues for downstream consumers, and the failed-message and broker backstop paths. Specific values are in [docs/aws-deployment-plan.md](docs/aws-deployment-plan.md).
+- [Dead-letter queues](docs/diagrams/pii-feeds-dead-letter-queues.svg): the ETKT input queue, its restricted dead-letter queue and who may read it.
+- [ETKT worker retry flow](docs/diagrams/etkt-worker-retry-flow.svg): redelivery, publish retries and dead-lettering for the ETKT worker.
 - [Feed protection workflow](docs/diagrams/presidio-feed-workflow.svg): the Solace input queue, the .NET worker (receive, decode, local Presidio, rebuild and validate, publish then acknowledge), the protected topic and the restricted dead-letter queue.
 
 ## C# conventions
 
 Types and members include XML summaries. Parameters, return values and property values are documented where applicable, including positional record values and non-public helpers. The application build generates XML documentation.
 
-Declarations use regions for fields and constants, constructors, methods, properties and indexers, and nested types. A file with only one top-level class does not need an outer `Classes` region; member regions inside that class still apply. Methods and properties are ordered by accessibility and then name; overloads stay together. Fields without runtime initializers are sorted by name, while initialized fields retain their construction order. Enum declarations retain their existing numeric and wire order (`FeedType.PNR` keeps the value 1). Control-flow and scoped resource statements use explicit blocks. Documentation does not add runtime annotation attributes.
+Declarations use regions for fields and constants, constructors, methods, properties and indexers, and nested types. A file with only one top-level class does not need an outer `Classes` region; member regions inside that class still apply. Methods and properties are ordered by accessibility and then name; overloads stay together. Fields without runtime initializers are sorted by name, while initialized fields retain their construction order. Enum declarations retain their existing numeric and wire order (`FeedType.ETKT` keeps the value 0). Control-flow and scoped resource statements use explicit blocks. Documentation does not add runtime annotation attributes.
 
 The root [.editorconfig](.editorconfig) shares C# formatting preferences with Visual Studio. See [C# formatting and cleanup](docs/code-cleanup.md) for the cleanup profile, terminal commands and rules that still require review.
 
 ## Decoded-text detection
 
-The PNR feed is decoded generically; there is no schema or field list, so a template change does not stop protection.
+The ETKT feed is decoded generically; there is no schema or field list, so a template change does not stop protection.
 
-`PnrDecoder` (an `XdrFeedDecoder`) reads the IBM MQ export or raw payload, and `XdrTextScanner` scans the big-endian XDR words for counted strings of four or more printable ASCII characters. Shorter spans stay raw words and are never changed, because words such as `00000001 31000000` cannot be told apart from a one-character string (WR-015). A counted string whose text is not printable ASCII but is mostly letters, digits or spaces (Latin-1, EBCDIC, or text with a control character) cannot be checked, so the message is dead-lettered; this includes lowercase and mixed-case EBCDIC. So is a length word followed by printable text that is longer than 65,535 bytes or runs past the end of the payload. Integers, framing and padding are never decoded or changed. Protected values are written back at the same width, and validation rejects any change outside the scanned strings.
+`EtktDecoder` (an `XdrFeedDecoder`) reads the IBM MQ export or raw payload, and `XdrTextScanner` scans the big-endian XDR words for counted strings of four or more printable ASCII characters. Shorter spans stay raw words and are never changed, because words such as `00000001 31000000` cannot be told apart from a one-character string (WR-015). A counted string whose text is not printable ASCII but is mostly letters, digits or spaces (Latin-1, EBCDIC, or text with a control character) cannot be checked, so the message is dead-lettered; this includes lowercase and mixed-case EBCDIC. So is a length word followed by printable text that is longer than 65,535 bytes or runs past the end of the payload. Integers, framing and padding are never decoded or changed. Protected values are written back at the same width, and validation rejects any change outside the scanned strings.
 
-The feed's recognizer file is [src/PresidioDemo.Core/Configuration/recognizers/pnr.xml](src/PresidioDemo.Core/Configuration/recognizers/pnr.xml). It is a Presidio-style XML: a flat list under `<recognizers>` that mirrors Presidio's recognizer registry YAML, its `analyze` allow list and its anonymizers map, using Presidio's names (WR-014). Each decoded string is decided on its own:
+The feed's recognizer file is [src/PresidioDemo.Core/Configuration/recognizers/etkt.xml](src/PresidioDemo.Core/Configuration/recognizers/etkt.xml). It is a Presidio-style XML: a flat list under `<recognizers>` that mirrors Presidio's recognizer registry YAML, its `analyze` allow list and its anonymizers map, using Presidio's names (WR-014). Each decoded string is decided on its own:
 
-1. **Allow list.** A string that matches an `<allow_list>` item end to end (exact text, or a regex with `match="regex"`) is published unchanged without analysis. An item never releases a piece of a longer string: `1405` is kept by `^\d{4}$`, but the `1234` inside `RBY09NOV*APPR CC VI 1234 OK` is still masked. Regex items match case-insensitively, as patterns do; exact items compare case-sensitively. Each item must be a valid regex on its own: one that only compiles inside the whole-string wrapper (an unbalanced `)`) stops startup.
-2. **Detection.** Every Presidio predefined recognizer runs (spaCy NER for `PERSON`, `LOCATION`, `NRP` and `DATE_TIME`; patterns for `EMAIL_ADDRESS`, `CREDIT_CARD`, `IP_ADDRESS` and the rest), unless the file switches it off by class name with `<recognizer name="…" type="predefined" enabled="false" />`. The file's `type="custom"` recognizers add PNR-specific patterns, context words and deny lists. Spans scoring below `default_score_threshold` are ignored.
+1. **Allow list.** A string that matches an `<allow_list>` item end to end (exact text, or a regex with `match="regex"`) is published unchanged without analysis. An item never releases a piece of a longer string: `1405` is kept by `^\d{4}$`, but the name inside `1405 MILLER/JORDAN` is still masked. Regex items match case-insensitively, as patterns do; exact items compare case-sensitively. Each item must be a valid regex on its own: one that only compiles inside the whole-string wrapper (an unbalanced `)`) stops startup.
+2. **Detection.** Every Presidio predefined recognizer runs (spaCy NER for `PERSON`, `LOCATION`, `NRP` and `DATE_TIME`; patterns for `EMAIL_ADDRESS`, `CREDIT_CARD`, `IP_ADDRESS` and the rest), unless the file switches it off by class name with `<recognizer name="…" type="predefined" enabled="false" />`. The file's `type="custom"` recognizers add ETKT-specific patterns, context words and deny lists. Spans scoring below `default_score_threshold` are ignored.
 3. **Actions.** Each detected span gets its entity's `<anonymizer>`, else the `DEFAULT` one, else Presidio's default `replace` (`<ENTITY>`). The operators are Presidio's `mask`, `replace`, `redact`, `hash` and `keep`, with Presidio's parameter names (`masking_char`, `chars_to_mask`, `from_end`, `new_value`, `hash_type`, `salt`); `encrypt`, `custom` and `surrogate_ahds` stop startup. Overlapping spans of different entities are resolved by score, then length, then position.
 4. **Width.** Every result is fitted to the width of the text it replaces: padded with spaces or cut (WR-015). `Alex Sample` becomes `***********` with `mask`, `<PERSON>` and three spaces with `replace`, eleven spaces with `redact`, and the first eleven hex characters of its hash with `hash`; in a five-character value, `replace` writes `<PERS`.
-5. **Nothing detected.** A string in which nothing is detected is published unchanged and listed for review in the detection log. There is no PNR-specific rule: a PNR is published unchanged unless a recognizer detects it.
+5. **Nothing detected.** A string in which nothing is detected is published unchanged and listed for review in the detection log. There is no PNR anchor: a divide-event PNR (the booking references after the ticket status record) is published unchanged unless a recognizer detects it.
 
 Local Presidio runs once per message as a batch through Python.NET, and returns spans only; every decision is made in .NET. A message is dead-lettered only for a structural failure: undecodable framing, binary text that is not printable ASCII, a recognizer pattern that times out (the bridge sets Presidio's limit to one second and treats a skipped pattern as a failure), or a rebuild that differs outside the protected strings (WR-016). An invalid recognizer file stops startup with a message naming the file and the problem, such as a retired element (`<builtIn>`, `<keep>`, `<format>`, `<pnrAnchor>`, `defaultMaskCharacter`), an unknown attribute, a rejected operator or a regex that does not compile.
 
-A custom recognizer and actions, with fictional data. `DOCSDAHK1/////12MAR85/F//MILLER/JORDAN-1MILLER/JORDAN` publishes as `DOCSDAHK1/////*******/*//*************-1*************`:
+A custom recognizer and actions, with fictional data. The ticket status record `12A34567,ISSUED` publishes as `********,ISSUED`: its reference prefix is masked and the status text stays readable:
 
 ```xml
-<recognizer name="dateOfBirth" type="custom" supported_entity="DATE_OF_BIRTH">
-  <pattern name="DOCS birth date" score="0.9">(?&lt;=/)\d{2}[A-Z]{3}\d{2}(?=/[MFUX]I?/)</pattern>
-  <context>DOCS</context>
+<recognizer name="statusPrefix" type="custom" supported_entity="UNCLASSIFIED_IDENTIFIER">
+  <pattern name="status record prefix" score="0.85">^\d{2}[A-Z0-9]\d{5}(?=,|$)</pattern>
 </recognizer>
 <allow_list match="regex">
   <item>^\d{4}$</item>
 </allow_list>
-<anonymizer entity="DATE_OF_BIRTH" type="mask" masking_char="*" />
-<anonymizer entity="DEFAULT" type="mask" masking_char="#" />
+<anonymizer entity="UNCLASSIFIED_IDENTIFIER" type="mask" masking_char="*" />
+<anonymizer entity="DEFAULT" type="mask" masking_char="*" />
 ```
 
-Patterns use syntax shared by .NET and the Python `regex` module and match case-insensitively. `<context>` and `<deny_list>` take space-separated words; a context word near a match raises its score. Loyalty, sensitive-attribute and financial entities mask with `#` so literal `*` separators stay distinguishable; the others use `*`.
+Patterns use syntax shared by .NET and the Python `regex` module and match case-insensitively. `<context>` and `<deny_list>` take space-separated words; a context word near a match raises its score. Every ETKT entity masks with `*`, as the earlier ETKT rules did.
 
 ### Changing a recognizer or an action
 
-1. Edit `Configuration/recognizers/pnr.xml`: add or change a `<recognizer>`, an `<allow_list>` item or an `<anonymizer>`. Each custom recognizer has a one-line `Example:` comment with fictional values (such as `MILLER/JORDAN` or `DA12345678`); add one for a new entry, never with real data.
+1. Edit `Configuration/recognizers/etkt.xml`: add or change a `<recognizer>`, an `<allow_list>` item or an `<anonymizer>`. Each custom recognizer has a one-line `Example:` comment with fictional values (such as `MILLER/JORDAN` or `0161234567890`); add one for a new entry, never with real data.
 2. Check parity: `src/.venv/Scripts/python.exe tests/run_sample_verification.py`. Every value in [tests/fixtures/parity-baseline.json](tests/fixtures/parity-baseline.json) must stay protected or be listed with a reason in [parity-exceptions.json](tests/fixtures/parity-exceptions.json) (WR-019); a released value fails this developer check, never the worker. Masking something the baseline does not list never fails it. Both files are value-free: sample, location, length, and an entity or a reason. The baseline was frozen from the field policies an earlier design used and cannot be regenerated. Every baseline entity type must have a custom recognizer or a Presidio predefined entity (`DetectionParityChecks -- config-checks`).
 3. Open a pull request. The recognizer file ships only inside the image built from it (PR-005), so a change reaches an environment by deploying that image. While decoded-text detection is a POC, that image is deployed to Dev only ([deployment plan](docs/aws-deployment-plan.md)).
 
@@ -183,7 +182,7 @@ Patterns use syntax shared by .NET and the Python `regex` module and match case-
 Without the values flag a block holds no value, only lengths and character shapes, so it may be switched on in any environment. A string is located by its slot and its byte offset in the decoded payload (`offsets=payload`); the binary feed has no field names. A made-up example:
 
 ```text
-PNR 3f9a… DETECTION PUBLISHED file=PNR_DEMO.txt fields=4 pii=1 non-pii=1 review=2 offsets=payload
+ETKT 3f9a… DETECTION PUBLISHED file=ETKT_DEMO.txt fields=4 pii=1 non-pii=1 review=2 offsets=payload
   PII fields (changed)
     slot 12 @0x01A4  len=13 shape=AAAAAA/AAAAAA  recognizer=passengerName entity=PERSON score=0.90 operator=mask decision=changed
   Non-PII fields (unchanged)
@@ -200,7 +199,7 @@ An empty group is printed as `(none)`. A message dead-lettered after detection r
 **Values in non-production (WR-020).** For testing in Local, Dev and QA, `Presidio:DetectionLogValues` (on by default, read at startup; `Presidio__DetectionLogValues=false` turns it off) adds the actual values: `"before" -> "after"` for a changed string, `"before"` for an unchanged one, and `-> not published` for a dead-lettered message. Values are JSON-encoded, so none of them can break a line:
 
 ```text
-PNR 3f9a… DETECTION PUBLISHED file=PNR_DEMO.txt fields=4 pii=1 non-pii=1 review=2 offsets=payload
+ETKT 3f9a… DETECTION PUBLISHED file=ETKT_DEMO.txt fields=4 pii=1 non-pii=1 review=2 offsets=payload
   PII fields (changed)
     slot 12 @0x01A4  "MILLER/JORDAN" -> "*************"  recognizer=passengerName entity=PERSON score=0.90 operator=mask decision=changed
   ...
@@ -212,18 +211,18 @@ PNR 3f9a… DETECTION PUBLISHED file=PNR_DEMO.txt fields=4 pii=1 non-pii=1 revie
 - Outside Local, while both `Presidio:DetectionLog` and `Presidio:DetectionLogValues` are on, the deployment's log group must keep entries for at most 7 days and be readable only by the PII team role. Either flag is switched only through a reviewed task-definition deploy. Because the values flag is on by default, switching the detection log on in `Dev` or `QA` is what starts writing values (PR-006, [deployment plan](docs/aws-deployment-plan.md)).
 - The test harness runs the same modes with `--detection-log on` and `--detection-log values`.
 
-**Harness files.** Each before/after file in `logs/PNR/` holds the block with values right after the payload hex dump, so an offset can be looked up there. Each run also writes `detection-summary.txt` beside `report.json` (WR-021): every review-group field across the run, by slot and payload offset, with its review reasons, character shapes, a count and the file names. It holds no string value.
+**Harness files.** Each before/after file in `logs/ETKT/` holds the block with values right after the payload hex dump, so an offset can be looked up there. Each run also writes `detection-summary.txt` beside `report.json` (WR-021): every review-group field across the run, by slot and payload offset, with its review reasons, character shapes, a count and the file names. It holds no string value.
 
 ### Results on the supplied samples
 
-Both PNR samples run through the real worker and local Presidio, and both are published. Of the 104 values the former field policies protected in them, 48 are protected and 56 are approved exceptions in [parity-exceptions.json](tests/fixtures/parity-exceptions.json): 7 binary strings of one to three characters (WR-015), and 49 values the Presidio-style rules no longer protect, accepted with one reason per category (18 free-text remarks with nothing detected, 12 remarks only partly masked, 7 six-character references, 5 short attribute codes, 4 standalone names and 3 phone numbers). The earlier field policies masked those by their position, which detection has no equivalent for. The value-free spike summary is in [tests/fixtures/spike-summary.json](tests/fixtures/spike-summary.json). In the samples, `PNR.txt` has 22 changed strings and 49 for review, and `PNR_02.txt` 2 and 19.
+All six ETKT samples run through the real worker and local Presidio, and all six are published, as in the multi-feed worker this one was split from. Of the 30 values the former field policies protected in them, 18 are protected and 12 are approved exceptions in [parity-exceptions.json](tests/fixtures/parity-exceptions.json): 6 binary strings of three characters (WR-015) and 6 four-digit sign-in numbers that match the time and flight-number allow-list item `^\d{4}$`, the same values the earlier ETKT rules published through their four-digit keep. The value-free spike summary is in [tests/fixtures/spike-summary.json](tests/fixtures/spike-summary.json). Every sample has its ticket numbers and the ticket status record's reference prefix masked; the status text and the dates, times and terminal addresses are published unchanged. `ETKT_03.txt` and `ETKT_04.txt` each have one review line, a 13-digit history number that spaCy reads as `DATE_TIME` and that is masked by the `DEFAULT` anonymizer, and `ETKT_05.txt` has two, its divide-event PNRs, in which nothing is detected.
 
 ### Known limits
 
 - A string in which nothing is detected is published unchanged (fail open, WR-014). Presidio's documentation notes that automated detection is not guaranteed to find all sensitive information; the detection log lists every such string under Review, and `detection-summary.txt` collects them, so a recognizer can be added.
-- spaCy NER guesses: it can detect an operational value (a PNR such as `JQWX4H` as `PERSON`, `JORDAN` in a seat remark as `LOCATION`, `1405` as `DATE_TIME`) and change it. Such lines are listed under Review as `spacy-guess`; an allow-list item keeps a value that must stay unchanged.
-- Binary strings of one to three characters are published unchanged (WR-015), for example three-digit phone area codes.
-- An allow-list item releases every whole string it matches, whatever it holds. The shipped date item (`^\d{2}[A-Z]{3}\d{2}(?:\d{2})?$`) also keeps a standalone date of birth such as `12MAR85` in its own string, and the time item (`^\d{4}$`) a standalone card suffix or approval code; inside a longer string, such as a DOCS record, they stay masked.
+- spaCy NER guesses: it can detect an operational value (a divide-event PNR such as `JQWX4H` as `PERSON`, `1405` as `DATE_TIME`) and change it, or win an overlap: in `ETKT_03.txt` and `ETKT_04.txt` it reads a 13-digit history number as `DATE_TIME`, which the `DEFAULT` anonymizer still masks in full. Such lines are listed under Review as `spacy-guess`; an allow-list item keeps a value that must stay unchanged.
+- Binary strings of one to three characters are published unchanged (WR-015), for example the three-character agent city code in every ETKT sample.
+- An allow-list item releases every whole string it matches, whatever it holds. The shipped date item (`^\d{2}[A-Z]{3}\d{2}$`) also keeps a standalone date of birth such as `12MAR85` in its own string, the time item (`^\d{4}$`) a four-digit sign-in number (the approved exceptions above), and the terminal-address item (`^[A-Z]\d[A-Z0-9]{4}$`) any six-character value of that shape, such as a divide-event PNR `K7QX2M`; inside a longer string they stay masked.
 - A result longer than the text it replaces is cut (`<PERS` for a five-character name with `replace`) and listed for review; `mask` never is.
 - `hash` writes the first characters of a 64- or 128-character hex digest, as many as the value is wide, and is not listed as cut. Without `salt`, each value gets a random salt, so equal values do not hash alike; with a fixed `salt`, a short value cut to a few hex characters can be guessed by trying values, so prefer `mask` for short values.
 - Binary text that contains NUL bytes, such as UTF-16, is not recognised as text and is published unchanged. Producers send ASCII; the supplied exports use CCSID 437.
@@ -325,7 +324,7 @@ $env:SOLACE_PASSWORD = "<same value>"
 dotnet run --project tools/FeedSampleSender
 ```
 
-Protected messages are published to the `airline/pnr/protected` topic and rejected ones go to the `q.pnr.dlq` queue. A topic keeps nothing without a subscriber, so start the output reader before sending. It subscribes to each route's output topic as `<ClientName>-reader`, decodes every message with its feed's codec, and writes the published (protected) value of each decoded string to a text file under the git-ignored `.test-runs/output-reader/`:
+Protected messages are published to the `airline/etkt/protected` topic and rejected ones go to the `q.etkt.dlq` queue. A topic keeps nothing without a subscriber, so start the output reader before sending. It subscribes to each route's output topic as `<ClientName>-reader`, decodes every message with its feed's codec, and writes the published (protected) value of each decoded string to a text file under the git-ignored `.test-runs/output-reader/`:
 
 ```powershell
 $env:SOLACE_PASSWORD = "<same value>"
@@ -333,23 +332,23 @@ dotnet run --project tools/FeedOutputReader                 # Ctrl+C stops; --co
 ```
 
 ```text
-RECV PNR    PNR.txt                    12466 bytes  fields=89
+RECV ETKT   ETKT.txt                    2136 bytes  fields=7
 ```
 
 ```text
-=== MESSAGE 1 | 2026-11-16 19:10:45.188 | topic:airline/pnr/protected
+=== MESSAGE 1 | 2026-11-16 19:10:45.188 | topic:airline/etkt/protected
   message ID: app:6b2df030ff5ddb11243d118435560d45
-  file:       "PNR.txt"
-  headers:    presidio-feed="PNR"
-  feed PNR | format mq-export | 12466 bytes | fields=89 | offsets=payload
+  file:       "ETKT.txt"
+  headers:    presidio-feed="ETKT"
+  feed ETKT | format mq-export | 2136 bytes | fields=7 | offsets=payload
   Decoded fields (published values)
-    slot 12 @0x01A4  "######/######"
+    slot 4 @0x005C  "***************"
     ...
 ```
 
-The reader removes nothing from any queue and sees only messages published while it runs; `--topic <topic>` replaces the route's topic (Solace wildcards such as `airline/pnr/>` are allowed) and `--output <file>` the log file. To keep protected output while no reader runs, create a queue in the PubSub+ Manager (http://localhost:8080, user `admin`) with the subscription `airline/>` before sending. Ctrl+C stops the worker after the current messages; unacknowledged messages are redelivered on the next start. `docker compose -f deploy/docker-compose.yml down` removes the broker and its queues.
+The reader removes nothing from any queue and sees only messages published while it runs; `--topic <topic>` replaces the route's topic (Solace wildcards such as `airline/etkt/>` are allowed) and `--output <file>` the log file. To keep protected output while no reader runs, create a queue in the PubSub+ Manager (http://localhost:8080, user `admin`) with the subscription `airline/>` before sending. Ctrl+C stops the worker after the current messages; unacknowledged messages are redelivered on the next start. `docker compose -f deploy/docker-compose.yml down` removes the broker and its queues.
 
-With the two PNR samples, expect 2 protected messages, no dead-lettered message, and an empty input queue. The local broker run has not been repeated on this branch; the harness gives the same result (see [Process files without a broker](#process-files-without-a-broker)).
+With the six ETKT samples, expect 6 protected messages, no dead-lettered message, and an empty input queue. The local broker run has not been repeated for this worker; the harness gives the same result (see [Process files without a broker](#process-files-without-a-broker)).
 
 To run a deployed environment, set `DOTNET_ENVIRONMENT` (for example `Dev`) and `SOLACE_PASSWORD`, then start `PresidioDemo.Worker`. It exits with code 1 and one message if the settings are invalid or the broker is unreachable.
 
@@ -366,16 +365,16 @@ docker compose -f deploy/docker-compose.yml --profile worker up -d --build
 docker compose -f deploy/docker-compose.yml logs -f worker   # wait for READY
 ```
 
-Then send the samples from the host as above (`dotnet run --project tools/FeedSampleSender`). `docker compose -f deploy/docker-compose.yml --profile worker down` stops both. Expect 2 protected messages from the two PNR samples; the container run has not been repeated on this branch.
+Then send the samples from the host as above (`dotnet run --project tools/FeedSampleSender`). `docker compose -f deploy/docker-compose.yml --profile worker down` stops both. Expect 6 protected messages from the six ETKT samples; the container run has not been repeated for this worker.
 
-**Dev broker.** Copy [deploy/.env.dev.example](deploy/.env.dev.example) to `deploy/.env.dev` and replace the DemoAir stand-ins with the real Dev host, VPN, user, password, queues and topics. Put the broker's CA certificate (PEM) in `deploy/certs/`. Both are git-ignored; never commit real values. Give `Solace__ClientName` a value of your own, because the broker disconnects an existing connection that uses the same client name. The PNR route is route 0 (`Messaging__Routes__0__…`); settings that still name another feed stop startup.
+**Dev broker.** Copy [deploy/.env.dev.example](deploy/.env.dev.example) to `deploy/.env.dev` and replace the DemoAir stand-ins with the real Dev host, VPN, user, password, queues and topics. Put the broker's CA certificate (PEM) in `deploy/certs/`. Both are git-ignored; never commit real values. Give `Solace__ClientName` a value of your own, because the broker disconnects an existing connection that uses the same client name. The ETKT route is route 0 (`Messaging__Routes__0__…`, the `TKT` queue); settings that still name another feed stop startup.
 
 ```powershell
 docker compose -f deploy/docker-compose.dev.yml up -d --build
 docker compose -f deploy/docker-compose.dev.yml logs -f worker
 ```
 
-`Dev` routes the PNR feed only; the broker's other queues are not consumed. `ProvisionQueues` is off, so the input and dead-letter queues must already exist and the user must be allowed to publish to the output topic. Before sending samples into Dev queues, confirm with the broker owner that this is allowed. To send them, load the same variables into the terminal, then run the sender:
+`Dev` routes the ETKT feed only; the broker's other queues are not consumed. `ProvisionQueues` is off, so the input and dead-letter queues must already exist and the user must be allowed to publish to the output topic. Before sending samples into Dev queues, confirm with the broker owner that this is allowed. To send them, load the same variables into the terminal, then run the sender:
 
 ```powershell
 Get-Content deploy/.env.dev | Where-Object { $_ -match '^[A-Za-z_]+=' } | ForEach-Object { $name, $value = $_ -split '=', 2; Set-Item "env:$name" $value }
@@ -405,12 +404,12 @@ The test harness sends `.txt` (IBM MQ export) and `.bin` (raw payload) files thr
 dotnet run --project tests/FeedPipelineHarness -- --input docs/sample-docs --output .test-runs/samples
 ```
 
-It writes `published/PNR/`, `dead-letter/PNR/` (with a `.reason.txt` per file), full before/after logs in `logs/PNR/`, `report.json` and `detection-summary.txt`. The exit code is 0 when every file is published and 2 when any file is rejected; the two PNR samples give 0. Files are routed by their feed folder, or by name (`PNR_02.txt`). `--recognizer-directory` selects another recognizer folder, `--detection-log on` prints the value-free detection blocks (`values` adds the values), and `--fail-publishes <n>` simulates a broker outage.
+It writes `published/ETKT/`, `dead-letter/ETKT/` (with a `.reason.txt` per file), full before/after logs in `logs/ETKT/`, `report.json` and `detection-summary.txt`. The exit code is 0 when every file is published and 2 when any file is rejected; the six ETKT samples give 0. Files are routed by their feed folder, or by name (`ETKT_02.txt`, or `TKT_02.txt`). `--recognizer-directory` selects another recognizer folder, `--detection-log on` prints the value-free detection blocks (`values` adds the values), and `--fail-publishes <n>` simulates a broker outage.
 
 ## Samples and configuration files
 
-- `docs/sample-docs/PNR/`: immutable source files for review and testing (`PNR.txt`, `PNR_02.txt`). They aren't needed at runtime. A future negative sample would end in `_Negative_Testing` and be rejected by design; none is supplied for PNR.
-- `src/PresidioDemo.Core/Configuration/recognizers/pnr.xml`: the feed's recognizer file, copied next to the worker at build time and into the image.
+- `docs/sample-docs/ETKT/`: immutable source files for review and testing (`ETKT.txt` and `ETKT_02.txt` to `ETKT_06.txt`). They aren't needed at runtime. A future negative sample would end in `_Negative_Testing` and be rejected by design; none is supplied for ETKT.
+- `src/PresidioDemo.Core/Configuration/recognizers/etkt.xml`: the feed's recognizer file, copied next to the worker at build time and into the image.
 
 The harness logs have separate `BEFORE ANONYMIZATION` and `AFTER ANONYMIZATION` headings with divider lines:
 - **Before, for MQ input:** the complete original feed data, the decoded payload, a plain-text payload view, then the detection block with values.
@@ -426,12 +425,12 @@ These logs contain original personal data and are written only under `.test-runs
 | --- | --- | --- |
 | `dotnet run --project tests/WorkerChecks` | Environment selection, settings validation (including a route for a removed feed), ack-after-publish, outage retry, redelivery, max deliveries, dead-lettering, header filtering | nothing |
 | `dotnet run --project tests/Messaging.ContractTests` | The broker contract, on the in-memory broker; also on Solace when `SOLACE_CONTRACT_TESTS=1` and the local broker runs | nothing (Solace: local broker) |
-| `dotnet run --project tests/FeedPipelineChecks` | Detection with real Presidio on both samples, the operators and width fitting, per-string decisions and switches, fail-closed cases, parity regression, scheduling and dead-lettering through `FeedWorker` | Python venv |
+| `dotnet run --project tests/FeedPipelineChecks` | Detection with real Presidio on every sample, the operators and width fitting, per-string decisions and switches, fail-closed cases, parity regression, scheduling and dead-lettering through `FeedWorker` | Python venv |
 | `dotnet run --project tests/FeedRoundTripChecks` | Byte-exact round trips without anonymization | nothing |
-| `dotnet run --project tests/GenericCodecChecks` | The generic XDR scanner and codec on both samples | nothing |
+| `dotnet run --project tests/GenericCodecChecks` | The generic XDR scanner and codec on every sample | nothing |
 | `dotnet run --project tests/DetectionParityChecks -- config-checks` / `-- spike` | Recognizer file validation; parity of the protected values, rebuilds and throughput against the frozen baseline | nothing / Python venv |
-| `src/.venv/Scripts/python.exe -m unittest discover -s tests/unit-tests -p test_*.py` | The PNR samples through the harness against the baseline, template changes, recognizer patterns, the detection bridge, the value-free detection log and the project layout | built solution, Python venv |
-| `src/.venv/Scripts/python.exe tests/run_sample_verification.py` | Both samples end to end | built solution, Python venv |
+| `src/.venv/Scripts/python.exe -m unittest discover -s tests/unit-tests -p test_*.py` | The ETKT samples through the harness against the baseline, template changes, recognizer patterns, the detection bridge, the value-free detection log and the project layout | built solution, Python venv |
+| `src/.venv/Scripts/python.exe tests/run_sample_verification.py` | Every sample end to end | built solution, Python venv |
 
 The round-trip checks load the normal codec and workflow with a keep-everything protector, and compare complete input and output bytes, decoded payloads and field values over three cycles per example. Results go to a fresh `.test-runs/round-trip-*` folder. The same checks also run in `FeedPipelineChecks`.
 
