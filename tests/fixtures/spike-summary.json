@@ -1,152 +1,36 @@
 {
   "parity": "PASS",
+  "scope": "names-only: only baseline values whose entity is PERSON are checked",
+  "defaultDetection": false,
   "protected": {
     "baseline": 30,
-    "caught": 18,
-    "missed": 12,
-    "approvedExceptions": 12,
-    "unapproved": 0
+    "namesInScope": 0,
+    "outOfScope": 30,
+    "caught": 0,
+    "missed": 0,
+    "approvedExceptions": 0,
+    "unapproved": 0,
+    "staleExceptions": 0
   },
   "rebuilds": {
     "production": 6,
     "valid": 6
   },
   "negatives": [],
-  "misses": [
-    {
-      "sample": "ETKT.txt",
-      "feed": "ETKT",
-      "location": "48",
-      "length": 3,
-      "entity": "UNCLASSIFIED_IDENTIFIER",
-      "shape": "AAA",
-      "decision": "rejected",
-      "format": ""
-    },
-    {
-      "sample": "ETKT.txt",
-      "feed": "ETKT",
-      "location": "76",
-      "length": 4,
-      "entity": "UNCLASSIFIED_IDENTIFIER",
-      "shape": "9999",
-      "decision": "allowed",
-      "format": "allow_list"
-    },
-    {
-      "sample": "ETKT_02.txt",
-      "feed": "ETKT",
-      "location": "48",
-      "length": 3,
-      "entity": "UNCLASSIFIED_IDENTIFIER",
-      "shape": "AAA",
-      "decision": "rejected",
-      "format": ""
-    },
-    {
-      "sample": "ETKT_02.txt",
-      "feed": "ETKT",
-      "location": "76",
-      "length": 4,
-      "entity": "UNCLASSIFIED_IDENTIFIER",
-      "shape": "9999",
-      "decision": "allowed",
-      "format": "allow_list"
-    },
-    {
-      "sample": "ETKT_03.txt",
-      "feed": "ETKT",
-      "location": "48",
-      "length": 3,
-      "entity": "UNCLASSIFIED_IDENTIFIER",
-      "shape": "AAA",
-      "decision": "rejected",
-      "format": ""
-    },
-    {
-      "sample": "ETKT_03.txt",
-      "feed": "ETKT",
-      "location": "76",
-      "length": 4,
-      "entity": "UNCLASSIFIED_IDENTIFIER",
-      "shape": "9999",
-      "decision": "allowed",
-      "format": "allow_list"
-    },
-    {
-      "sample": "ETKT_04.txt",
-      "feed": "ETKT",
-      "location": "48",
-      "length": 3,
-      "entity": "UNCLASSIFIED_IDENTIFIER",
-      "shape": "AAA",
-      "decision": "rejected",
-      "format": ""
-    },
-    {
-      "sample": "ETKT_04.txt",
-      "feed": "ETKT",
-      "location": "76",
-      "length": 4,
-      "entity": "UNCLASSIFIED_IDENTIFIER",
-      "shape": "9999",
-      "decision": "allowed",
-      "format": "allow_list"
-    },
-    {
-      "sample": "ETKT_05.txt",
-      "feed": "ETKT",
-      "location": "48",
-      "length": 3,
-      "entity": "UNCLASSIFIED_IDENTIFIER",
-      "shape": "AAA",
-      "decision": "rejected",
-      "format": ""
-    },
-    {
-      "sample": "ETKT_05.txt",
-      "feed": "ETKT",
-      "location": "76",
-      "length": 4,
-      "entity": "UNCLASSIFIED_IDENTIFIER",
-      "shape": "9999",
-      "decision": "allowed",
-      "format": "allow_list"
-    },
-    {
-      "sample": "ETKT_06.txt",
-      "feed": "ETKT",
-      "location": "48",
-      "length": 3,
-      "entity": "UNCLASSIFIED_IDENTIFIER",
-      "shape": "AAA",
-      "decision": "rejected",
-      "format": ""
-    },
-    {
-      "sample": "ETKT_06.txt",
-      "feed": "ETKT",
-      "location": "76",
-      "length": 4,
-      "entity": "UNCLASSIFIED_IDENTIFIER",
-      "shape": "9999",
-      "decision": "allowed",
-      "format": "allow_list"
-    }
-  ],
+  "misses": [],
   "throughput": {
     "rounds": 20,
     "messages": 120,
-    "nlpNer": "on (spaCy en_core_web_lg)",
-    "messagesPerSecondPerTask": 78.2,
+    "nlpNer": "not acted on (Presidio:DefaultDetection false); spaCy en_core_web_lg still processes each analyzed string for context words",
+    "messagesPerSecondPerTask": 126.7,
     "feeds": [
       {
         "feed": "ETKT",
-        "messagesPerSecondPerTask": 78.2,
-        "tasks": 6
+        "messagesPerSecondPerTask": 126.8,
+        "tasks": 4
       }
     ],
-    "tasksForPeak": 6,
+    "tasksForPeak": 4,
     "assumption": "400 msg/s peak for the ETKT feed; one worker process per ECS task"
   },
   "rejected": []

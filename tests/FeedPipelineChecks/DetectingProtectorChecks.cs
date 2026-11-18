@@ -8,7 +8,10 @@ using PresidioDemo.Core.Protection;
 /// <summary>
 /// Checks the decoded-text protector (WR-014, WR-015): each decoded string is decided on its own, detected spans get their
 /// entity's action fitted to width, a string in which nothing is detected is published unchanged and listed for review,
-/// detection failures dead-letter, and every production sample rebuilds and validates.
+/// detection failures dead-letter, and every production sample rebuilds and validates. The shipped
+/// <c>Presidio:DefaultDetection</c> is off, so only the recognizers a file defines act; the checks that need Presidio's
+/// predefined recognizers switch it on, and the four combinations of the switch with and without defined recognizers are
+/// checked on made-up strings.
 /// </summary>
 internal static class DetectingProtectorChecks
 {
@@ -26,6 +29,9 @@ internal static class DetectingProtectorChecks
         var files = RecognizerFileReader.ReadAll(recognizers);
         string samples = Path.Combine(projectRoot, "docs", "sample-docs");
         var protector = new DetectingFeedProtector(files);
+        Check(!protector.DefaultDetection && !FeedPipelineConfiguration.Load(recognizers).CreateProtector().DefaultDetection
+            && FeedPipelineConfiguration.Load(recognizers, defaultDetection: true).CreateProtector().DefaultDetection,
+            "default detection is off unless Presidio:DefaultDetection switches it on");
 
         // Detection failure: the bridge has no registry for an unconfigured feed name, so the call fails and dead-letters.
         var unconfigured = new DetectingFeedProtector(new Dictionary<FeedType, RecognizerFile> { [FeedType.ETKT] = files[FeedType.ETKT] });
@@ -157,14 +163,19 @@ internal static class DetectingProtectorChecks
             "400 blocks written from 16 threads at once each come out whole");
         Console.WriteLine("PASS the detection log writes one grouped block per message, with a fix per review line and values only when passed (WR-018, WR-020)");
 
-        // WR-014 on the shipped file: declared recognizers act, allowed strings and undetected strings stay unchanged.
+        // WR-014 on the shipped file with default detection off: declared recognizers act, allowed strings and undetected
+        // strings stay unchanged, and no predefined recognizer decides anything. The ETKT samples hold no passenger name in
+        // the SURNAME/GIVEN shape, so with names-only none of their strings changes.
         string etktSample = Path.Combine(samples, "ETKT", "ETKT.txt");
         string divideSample = Path.Combine(samples, "ETKT", "ETKT_05.txt");
         var divideOutcome = await protector.ProtectAsync(FeedType.ETKT, Parse(divideSample), CancellationToken.None);
-        Check(divideOutcome.Events.Any(e => e.Decision == DetectionDecision.Changed) && divideOutcome.Events.Any(e => e.Decision == DetectionDecision.Allowed)
-            && divideOutcome.Events.Any(e => e.Decision == DetectionDecision.NothingDetected), "ETKT_05.txt has changed, allowed and undetected strings");
+        Check(!divideOutcome.Events.Any(e => e.Decision == DetectionDecision.Changed) && divideOutcome.Events.Any(e => e.Decision == DetectionDecision.Allowed)
+            && divideOutcome.Events.Any(e => e.Decision == DetectionDecision.NothingDetected), "ETKT_05.txt has allowed and undetected strings, and names-only changes none of them");
         Check(divideOutcome.Events.Where(e => e.Decision is DetectionDecision.Allowed or DetectionDecision.NothingDetected or DetectionDecision.BelowThreshold)
             .All(e => divideOutcome.Values[Parse(divideSample).Fields[e.Slot].Id] == Parse(divideSample).Fields[e.Slot].Value), "allowed and undetected strings are published unchanged");
+        var defined = files[FeedType.ETKT].Recognizers.Select(r => r.Name).Concat(["allow_list", "none"]).ToHashSet(StringComparer.Ordinal);
+        Check(divideOutcome.Events.All(e => e.Recognizer.Split('+').All(defined.Contains) && !e.Reasons.HasFlag(ReviewReason.SpacyGuess)),
+            "with default detection off every decision names a defined recognizer, and nothing is a spacy-guess");
         // AC-011: no PNR anchor. The divide-event PNRs after the ticket status record (WR-017) are six letters in which
         // nothing is detected, so they are published unchanged; a message whose status record has lost its reference
         // prefix still publishes, and its divide-event PNRs stay unchanged.
@@ -178,17 +189,16 @@ internal static class DetectingProtectorChecks
             && noStatusPrefix.Fields.Where(f => f.Value.Length == 6 && f.Value.All(char.IsAsciiLetterUpper)).All(f => stillPublished.Values[f.Id] == f.Value),
             "a message without a ticket status prefix is protected, not dead-lettered, and keeps its divide-event PNRs");
 
-        // Made-up strings through the shipped file (AC-004, AC-005, AC-013).
+        // Made-up strings through the shipped file (AC-004, AC-005, AC-013), default detection off.
         var shipped = await ProtectStringsAsync(protector, "MILLER/JORDAN", "Please book a window seat", "1405", "12A34567,ISSUED  &I  ,          &",
             "Contact Alex Sample", "0161234567890", "001612345678901", "12A34567", " 905A", "A1B2C3", "1405 MILLER/JORDAN");
         Check(shipped[0] == "*************", "a declared recognizer masks MILLER/JORDAN");
         Check(shipped[1] == "Please book a window seat", "a string in which nothing is detected is published unchanged");
         Check(shipped[2] == "1405" && shipped[8] == " 905A" && shipped[9] == "A1B2C3", "whole-string allow-list items keep 1405, 905A with its leading space, and A1B2C3");
         Check(shipped[10].EndsWith(" *************", StringComparison.Ordinal), "an allow-list item never releases a detected piece inside a longer string");
-        Check(shipped[3] == "********,ISSUED  &I  ,          &", "a ticket status record masks its reference prefix only and keeps the status text");
-        Check(shipped[4] == "Contact ***********", "Presidio's PERSON is masked by the PERSON anonymizer");
-        Check(shipped[5] == "*************" && shipped[6] == "***************", "13- and 15-digit ticket numbers are masked in full");
-        Check(shipped[7] == "********", "a status record of the prefix alone is masked in full");
+        Check(shipped[4] == "Contact Alex Sample", "no spaCy PERSON guess runs with default detection off");
+        Check(shipped[3] == "12A34567,ISSUED  &I  ,          &" && shipped[5] == "0161234567890" && shipped[6] == "001612345678901" && shipped[7] == "12A34567",
+            "names-only: ticket status records and 13- and 15-digit ticket numbers are published as received");
         Console.WriteLine("PASS the shipped file acts per string: declared recognizers, allow list, unchanged when nothing is detected");
 
         // AC-003, AC-006, AC-008: test-only files reconfigure the ETKT registry, so the shipped one is restored afterwards.
@@ -198,9 +208,10 @@ internal static class DetectingProtectorChecks
             File.WriteAllText(file, content);
             return file;
         }
-        DetectingFeedProtector Configured(string file)
+        DetectingFeedProtector Configured(string file, bool defaultDetection = false)
         {
-            var configured = new DetectingFeedProtector(new Dictionary<FeedType, RecognizerFile> { [FeedType.ETKT] = RecognizerFileReader.Read(file, FeedType.ETKT) });
+            var configured = new DetectingFeedProtector(new Dictionary<FeedType, RecognizerFile> { [FeedType.ETKT] = RecognizerFileReader.Read(file, FeedType.ETKT) },
+                defaultDetection);
             configured.Configure();
             return configured;
         }
@@ -208,29 +219,53 @@ internal static class DetectingProtectorChecks
         string noCards = Temporary("<recognizers feed=\"ETKT\"><recognizer name=\"CreditCardRecognizer\" type=\"predefined\" enabled=\"false\" />"
             + "<anonymizer entity=\"PERSON\" type=\"mask\" /></recognizers>");
         string withDefault = Temporary("<recognizers feed=\"ETKT\"><anonymizer entity=\"PERSON\" type=\"mask\" /><anonymizer entity=\"DEFAULT\" type=\"mask\" /></recognizers>");
+        string shippedFile = Path.Combine(recognizers, RecognizerFileReader.FileName(FeedType.ETKT));
         try
         {
-            var bare = await ProtectStringsAsync(Configured(empty), "Please book a window seat", "Contact Alex Sample", "alex@example.com", "Card 4111 1111 1111 1111");
+            // Presidio:DefaultDetection with and without defined recognizers (made-up strings).
+            string[] madeUp = ["CTCEDAHK1 alex@example.com 1MILLER/JORDAN", "Contact Alex Sample", "Card 4111 1111 1111 1111", "Please book a window seat"];
+            var definedOnly = await ProtectStringsAsync(protector, madeUp);
+            Check(definedOnly[0] == "CTCEDAHK1 alex@example.com 1*************" && definedOnly[1] == madeUp[1] && definedOnly[2] == madeUp[2],
+                "default detection off with recognizers: only the defined ones act; the made-up email stays and the SURNAME/GIVEN name is masked");
+            var both = await ProtectOutcomeAsync(Configured(shippedFile, defaultDetection: true), madeUp);
+            Check(both.Values["0"] == "CTCEDAHK1 **************** 1*************" && both.Values["1"] == "Contact ***********"
+                && both.Values["2"] == "Card " + new string('*', 19) && both.Values["3"] == madeUp[3],
+                $"default detection on with recognizers: both act; the email gets DEFAULT and Presidio's PERSON the PERSON anonymizer (got {string.Join(" | ", both.Values.Values)})");
+            Check(both.Events[0].Recognizer.Split('+').Contains("passengerName") && both.Events[0].Recognizer.Split('+').Contains("EmailRecognizer")
+                && both.Events[1].Reasons.HasFlag(ReviewReason.SpacyGuess), "default detection on: the log names both kinds of recognizer, and a spaCy guess is for review");
+            var presidioOnly = await ProtectStringsAsync(Configured(empty, defaultDetection: true), madeUp);
+            Check(presidioOnly[0] == "CTCEDAHK1 <EMAIL_ADDRESS>  1MILLER/JORDAN" && presidioOnly[1] == "Contact <PERSON>   " && presidioOnly[3] == madeUp[3],
+                $"default detection on without recognizers: only Presidio acts (got {string.Join(" | ", presidioOnly)})");
+            var nothingInput = Parse(etktSample);
+            var nothing = await Configured(empty).ProtectAsync(FeedType.ETKT, nothingInput, CancellationToken.None);
+            var nothingStrings = await ProtectStringsAsync(Configured(empty), madeUp);
+            byte[] etktBytes = File.ReadAllBytes(etktSample);
+            Check(nothingStrings.SequenceEqual(madeUp) && nothing.Events.All(e => e.Decision is DetectionDecision.NothingDetected or DetectionDecision.Allowed)
+                && Codec(FeedType.ETKT).Serialize(nothingInput, nothing.Values).AsSpan().SequenceEqual(etktBytes),
+                "default detection off without recognizers: the output equals the input, byte for byte");
+            Console.WriteLine("PASS Presidio:DefaultDetection: off runs only the defined recognizers (none: output equals input); on adds Presidio's predefined recognizers");
+
+            var bare = await ProtectStringsAsync(Configured(empty, defaultDetection: true), "Please book a window seat", "Contact Alex Sample", "alex@example.com", "Card 4111 1111 1111 1111");
             Check(bare[0] == "Please book a window seat", "an emptied file starts and publishes an undetected string unchanged");
             Check(bare[1] == "Contact <PERSON>   " && bare[2] == "<EMAIL_ADDRESS> " && bare[3] == "Card " + "<CREDIT_CARD>".PadRight(19),
-                "with nothing configured Presidio's predefined recognizers detect, and replace is fitted to width");
-            var switchedOff = await ProtectStringsAsync(Configured(noCards), "Card 4111 1111 1111 1111", "Contact Alex Sample", "alex@example.com");
+                "with default detection on and nothing configured Presidio's predefined recognizers detect, and replace is fitted to width");
+            var switchedOff = await ProtectStringsAsync(Configured(noCards, defaultDetection: true), "Card 4111 1111 1111 1111", "Contact Alex Sample", "alex@example.com");
             Check(switchedOff[0] == "Card 4111 1111 1111 1111", "a predefined recognizer switched off detects nothing");
             Check(switchedOff[1] == "Contact ***********" && switchedOff[2] == "<EMAIL_ADDRESS> ", "an entity uses its own anonymizer, else replace");
-            var fallback = await ProtectStringsAsync(Configured(withDefault), "alex@example.com");
+            var fallback = await ProtectStringsAsync(Configured(withDefault, defaultDetection: true), "alex@example.com");
             Check(fallback[0] == "****************", "an entity without its own anonymizer uses DEFAULT");
-            Console.WriteLine("PASS an emptied file runs Presidio's defaults; switches and anonymizers change the output with no code change");
+            Console.WriteLine("PASS with default detection on an emptied file runs Presidio's defaults; switches and anonymizers change the output with no code change");
 
-            // Review reasons as the protector produces them (made-up strings).
-            var guess = await ProtectOutcomeAsync(Configured(withDefault), "Contact Alex Sample", "alex@example.com", "LI WU");
+            // Review reasons as the protector produces them (made-up strings), with default detection on.
+            var guess = await ProtectOutcomeAsync(Configured(withDefault, defaultDetection: true), "Contact Alex Sample", "alex@example.com", "LI WU");
             Check(guess.Events[0].Reasons.HasFlag(ReviewReason.SpacyGuess) && !guess.Events[0].Reasons.HasFlag(ReviewReason.NoAction),
                 "a spaCy PERSON with its own anonymizer is a spacy-guess, not a no-action");
             Check(guess.Events[1].Reasons.HasFlag(ReviewReason.NoAction) && guess.Events[1].NoActionEntities.Contains("EMAIL_ADDRESS", StringComparison.Ordinal),
                 "an entity that used DEFAULT is a no-action naming that entity");
-            var mixed = await ProtectOutcomeAsync(Configured(noCards), "Contact Alex Sample at alex@example.com");
+            var mixed = await ProtectOutcomeAsync(Configured(noCards, defaultDetection: true), "Contact Alex Sample at alex@example.com");
             Check(mixed.Events[0].NoActionEntities.Contains("EMAIL_ADDRESS", StringComparison.Ordinal) && !mixed.Events[0].NoActionEntities.Contains("PERSON", StringComparison.Ordinal),
                 "the no-action fix names only the entities without their own anonymizer");
-            var cut = await ProtectOutcomeAsync(Configured(empty), "LI WU");
+            var cut = await ProtectOutcomeAsync(Configured(empty, defaultDetection: true), "LI WU");
             Check(cut.Values["0"] == "<PERS" && cut.Events[0].Reasons.HasFlag(ReviewReason.Cut), "a replace result longer than the value is cut and listed as cut");
         }
         finally
@@ -243,8 +278,9 @@ internal static class DetectingProtectorChecks
 
         // Overlaps, keep and hash with custom recognizers (made-up codes): CODE_A covers AB1234 at 0.9 and CODE_B covers
         // 1234CD at 0.7, so CODE_A wins the shared 1234 and CODE_B keeps CD. chars_to_mask counts from CODE_B's own start,
-        // so masking its first two characters changes only what CODE_A already took. spaCy is switched off, because it reads
-        // a made-up code such as AB1234CD as a PERSON and would win the whole string.
+        // so masking its first two characters changes only what CODE_A already took. Default detection is off, and the file
+        // switches spaCy off too, because with it on spaCy reads a made-up code such as AB1234CD as a PERSON and would win
+        // the whole string.
         string Codes(string actionA, string actionB) => Temporary("<recognizers feed=\"ETKT\">"
             + "<recognizer name=\"CryptoRecognizer\" type=\"predefined\" enabled=\"true\" />"
             + "<recognizer name=\"SpacyRecognizer\" type=\"predefined\" enabled=\"false\" />"
@@ -346,23 +382,12 @@ internal static class DetectingProtectorChecks
             "ETKT raw word published unchanged");
         Console.WriteLine("PASS an ETKT message with a changed raw word is published with the word unchanged");
 
-        // WR-019: narrowing a recognizer breaks parity with the frozen baseline before merge. This reconfigures the ETKT
-        // registry, so it runs last and restores the shipped configuration afterwards.
-        string narrowed = Temporary(File.ReadAllText(Path.Combine(recognizers, "etkt.xml"))
-            .Replace(@"^\d{13,15}$", @"^\d{30,}$", StringComparison.Ordinal));
-        try
-        {
-            int reviewedMisses = await ParityMissesAsync(protector, projectRoot, FeedType.ETKT);
-            Check(reviewedMisses == 0, "the shipped recognizers must have no unapproved ETKT parity miss");
-            int narrowedMisses = await ParityMissesAsync(Configured(narrowed), projectRoot, FeedType.ETKT);
-            Check(narrowedMisses > 0, "a narrowed ticket-number recognizer must fail parity");
-            Console.WriteLine($"PASS a narrowed ETKT ticket-number recognizer fails parity with the frozen baseline ({narrowedMisses} unapproved misses)");
-        }
-        finally
-        {
-            File.Delete(narrowed);
-            protector.Configure();
-        }
+        // WR-019: the names-only parity with the frozen baseline. The ETKT baseline holds no PERSON value (0 names in scope),
+        // so no narrowed recognizer can fail it here; ConfigurationChecks shows the name-coverage check failing on a made-up
+        // baseline name instead.
+        int reviewedMisses = await ParityMissesAsync(protector, projectRoot, FeedType.ETKT);
+        Check(reviewedMisses == 0, "the shipped recognizers must have no unapproved ETKT parity miss");
+        Console.WriteLine("PASS the shipped ETKT recognizers keep the names-only parity with the frozen baseline (0 names in scope)");
     }
 
     /// <summary>
@@ -382,8 +407,9 @@ internal static class DetectingProtectorChecks
             new FeedField(i.ToString(System.Globalization.CultureInfo.InvariantCulture), "slot" + i, value)).ToArray(), new object()), CancellationToken.None);
 
     /// <summary>
-    /// Counts baseline values of one binary feed that the protector publishes unchanged and that are not approved
-    /// exceptions (WR-019). Value-free: compares bytes at the frozen locations only.
+    /// Counts baseline names (PERSON values) of one binary feed that the protector publishes unchanged and that are not
+    /// approved exceptions (WR-019). Names-only: every other baseline value is out of scope. Value-free: compares bytes at
+    /// the frozen locations only.
     /// </summary>
     /// <param name="protector">The protector to measure.</param>
     /// <param name="projectRoot">The repository root.</param>
@@ -396,7 +422,8 @@ internal static class DetectingProtectorChecks
         var exceptions = approved.RootElement.EnumerateArray().Select(e => (e.GetProperty("sample").GetString(), e.GetProperty("location").GetString())).ToHashSet();
         string folder = FeedCatalog.Get(feed).FolderName;
         int misses = 0;
-        foreach (var group in baseline.RootElement.GetProperty("protected").EnumerateArray().Where(e => e.GetProperty("feed").GetString() == folder)
+        foreach (var group in baseline.RootElement.GetProperty("protected").EnumerateArray()
+            .Where(e => e.GetProperty("feed").GetString() == folder && e.GetProperty("entity").GetString() == "PERSON")
             .GroupBy(e => e.GetProperty("sample").GetString()!))
         {
             string path = Path.Combine(projectRoot, "docs", "sample-docs", folder, group.Key);

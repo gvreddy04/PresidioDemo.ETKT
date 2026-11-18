@@ -2,6 +2,14 @@
 <!--
   ETKT recognizers in the Presidio-style format (WR-014): a flat list under <recognizers> that mirrors Presidio's
   recognizer registry YAML, its analyze allow_list and its anonymizers map, using Presidio's names.
+  Scope: passenger names only. The file defines the one PERSON recognizer below; every other ETKT value (ticket
+  numbers, ticket status reference prefixes and the rest) is published as received.
+  Presidio:DefaultDetection (appsettings.json, default false) decides whether Presidio's predefined recognizers run too:
+    false: only the recognizer defined here acts; Presidio's predefined recognizers (email, phone, credit card, IP,
+           IBAN, spaCy PERSON, LOCATION, NRP, DATE_TIME and the rest) do not run. Example: in
+           0161234567890 MILLER/JORDAN, only MILLER/JORDAN is masked.
+    true:  the recognizer defined here acts, plus Presidio's predefined recognizers (minus any switched off below);
+           their spans get their entity's <anonymizer>, else DEFAULT. Example: alex@example.com -> ****************.
   Each decoded string is decided on its own: a string that matches an <allow_list> item end to end is published
   unchanged; otherwise every span detected at or above default_score_threshold gets its entity's <anonymizer>, else
   DEFAULT, else Presidio's replace; a string in which nothing is detected is published unchanged and listed for review.
@@ -9,21 +17,11 @@
 -->
 <recognizers feed="ETKT" language="en" default_score_threshold="0.5">
 
-  <!-- ===== Predefined recognizers (Presidio's own). All of them run unless switched off by class name, for example:
+  <!-- ===== Predefined recognizers (Presidio's own). They run only with Presidio:DefaultDetection true, and then all of them
+       run unless switched off by class name, for example:
        <recognizer name="CryptoRecognizer" type="predefined" enabled="false" />  ===== -->
 
-  <!-- ===== Custom pattern recognizers (Presidio type: custom). ===== -->
-
-  <!-- Example: 0161234567890 (13 digits) -> *************. -->
-  <recognizer name="ticketNumber" type="custom" supported_entity="TICKET_REFERENCE">
-    <pattern name="13 to 15 digits" score="0.85">^\d{13,15}$</pattern>
-  </recognizer>
-
-  <!-- The eight-character reference prefix that opens the ticket status record. -->
-  <!-- Example: in 12A34567,ISSUED, 12A34567 -> ********; the rest of the record is published unchanged. -->
-  <recognizer name="statusPrefix" type="custom" supported_entity="UNCLASSIFIED_IDENTIFIER">
-    <pattern name="status record prefix" score="0.85">^\d{2}[A-Z0-9]\d{5}(?=,|$)</pattern>
-  </recognizer>
+  <!-- ===== Custom pattern recognizers (Presidio type: custom): passenger names. ===== -->
 
   <!-- Example: MILLER/JORDAN -> *************. Presidio's PERSON misses this format. -->
   <recognizer name="passengerName" type="custom" supported_entity="PERSON">
@@ -32,8 +30,9 @@
 
   <!-- ===== Allow list: a decoded string that matches an item end to end is published unchanged. ===== -->
   <!-- Examples: 09NOV26 (entry date); 1405 or flight 0117 (a four-digit sign-in number has the same shape and is
-       published unchanged too, an approved exception in tests/fixtures/parity-exceptions.json); 1405P, or 905A with a
-       leading space (flight time); A1B2C3 (terminal address). -->
+       published unchanged too); 1405P, or 905A with a leading space (flight time); A1B2C3 (terminal address). The items
+       stop no recognizer defined above; they are kept for Presidio:DefaultDetection true, where Presidio's DATE_TIME and
+       other guesses would otherwise change such strings. -->
   <allow_list match="regex">
     <item>^\d{2}[A-Z]{3}\d{2}$</item>
     <item>^\d{4}$</item>
@@ -44,10 +43,8 @@
   <!-- ===== Anonymizers (Presidio anonymizers map): one action per entity. ===== -->
   <!-- Allowed types: mask, replace, redact, hash, keep; every result is fitted to the width it replaces (WR-015). -->
   <anonymizer entity="PERSON" type="mask" masking_char="*" />
-  <anonymizer entity="TICKET_REFERENCE" type="mask" masking_char="*" />
-  <anonymizer entity="UNCLASSIFIED_IDENTIFIER" type="mask" masking_char="*" />
-  <!-- Every other entity, including Presidio's EMAIL_ADDRESS, IP_ADDRESS, CREDIT_CARD and LOCATION.
-       Without this line Presidio's default applies: replace with <ENTITY>. -->
+  <!-- Every other entity: with Presidio:DefaultDetection true, Presidio's EMAIL_ADDRESS, IP_ADDRESS, CREDIT_CARD,
+       LOCATION and the rest. Without this line Presidio's default applies: replace with <ENTITY>. -->
   <anonymizer entity="DEFAULT" type="mask" masking_char="*" />
 
 </recognizers>
