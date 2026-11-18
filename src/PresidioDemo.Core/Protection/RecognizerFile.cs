@@ -140,7 +140,7 @@ public static class RecognizerFileReader
     #region Methods
 
     /// <summary>
-    /// Returns the file name of a feed's recognizer XML, such as <c>pnr.xml</c>.
+    /// Returns the file name of a feed's recognizer XML, such as <c>etkt.xml</c>.
     /// </summary>
     /// <param name="feed">The feed route.</param>
     /// <returns>The file name.</returns>

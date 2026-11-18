@@ -8,7 +8,7 @@ namespace PresidioDemo.Core.Decoder;
 /// The shared decoder for the binary XDR feeds, with no per-feed schema: every counted string of four or more printable characters becomes a
 /// field, and protected values are written back at the same width so the framing stays valid (WR-004, WR-015).
 /// </summary>
-/// The PNR feed has one sealed child, <see cref="PnrDecoder"/>.
+/// The ETKT feed has one sealed child, <see cref="EtktDecoder"/>.
 /// <param name="feed">The binary feed route this decoder serves.</param>
 public abstract class XdrFeedDecoder(FeedType feed) : IFeedCodec
 {
