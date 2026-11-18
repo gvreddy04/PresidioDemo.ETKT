@@ -68,27 +68,27 @@ static async Task CheckScheduling(IFeedProtector protector, byte[] input)
             var options = TestMessaging();
             using (var cancellation = new CancellationTokenSource())
             {
-                Task pnr = TestWorker(FeedType.PNR, options, broker, router).RunAsync(cancellation.Token);
+                Task etkt = TestWorker(FeedType.ETKT, options, broker, router).RunAsync(cancellation.Token);
                 try
                 {
-                    broker.Send("in.PNR", input);
+                    broker.Send("in.ETKT", input);
                     await Wait(() => started.IsSet);
-                    broker.Send("in.PNR", input);
+                    broker.Send("in.ETKT", input);
                     await Task.Delay(200);
-                    Check(broker.PublishedTo("out/PNR").Count == 0, "Blocked message was published.");
-                    Check(broker.Pending("in.PNR") == 2, "One worker ran two messages concurrently.");
+                    Check(broker.PublishedTo("out/ETKT").Count == 0, "Blocked message was published.");
+                    Check(broker.Pending("in.ETKT") == 2, "One worker ran two messages concurrently.");
                     Console.WriteLine("PASS one worker processes one active message at a time");
                     cancellation.Cancel();
                     await Task.Delay(100);
-                    Check(!pnr.IsCompleted, "Worker returned before draining active work.");
+                    Check(!etkt.IsCompleted, "Worker returned before draining active work.");
                     release.Set();
-                    await pnr;
-                    Check(broker.Pending("in.PNR") == 2 && broker.PublishedTo("out/PNR").Count == 0, "Interrupted message was acknowledged or published.");
+                    await etkt;
+                    Check(broker.Pending("in.ETKT") == 2 && broker.PublishedTo("out/ETKT").Count == 0, "Interrupted message was acknowledged or published.");
                     // Counted over the whole run: the second message never entered processing while the first was active.
                     Check(blocking.Entries == 1, "One worker started a second message while the first was still active.");
                     Console.WriteLine("PASS shutdown drains active work before Python disposal and leaves interrupted input unacknowledged for redelivery");
                 }
-                finally { cancellation.Cancel(); release.Set(); await pnr; }
+                finally { cancellation.Cancel(); release.Set(); await etkt; }
             }
         }
     }
@@ -107,7 +107,7 @@ try
     var protector = new FixtureProtector();
     var codec = new TestOnlyCodec();
     byte[] input = codec.CreateFixture();
-    var metadata = new FeedDelivery(FeedType.PNR, Guid.NewGuid(), "fixture.bin", "test-only");
+    var metadata = new FeedDelivery(FeedType.ETKT, Guid.NewGuid(), "fixture.bin", "test-only");
     var parsed = codec.Parse(new(metadata, input));
     byte[] unchanged = codec.Serialize(parsed, parsed.Fields.ToDictionary(field => field.Id, field => field.Value));
     Check(input.AsSpan().SequenceEqual(unchanged), "Unchanged fixture failed its exact-byte round trip.");
@@ -119,15 +119,15 @@ try
     var options = TestMessaging();
     using (var cancellation = new CancellationTokenSource())
     {
-        Task running = TestWorker(FeedType.PNR, options, broker, router).RunAsync(cancellation.Token);
+        Task running = TestWorker(FeedType.ETKT, options, broker, router).RunAsync(cancellation.Token);
         try
         {
-            broker.Send("in.PNR", input);
-            await Wait(() => broker.PublishedTo("out/PNR").Count == 1 && broker.Pending("in.PNR") == 0);
-            byte[] output = broker.PublishedTo("out/PNR").Single().Payload.ToArray();
+            broker.Send("in.ETKT", input);
+            await Wait(() => broker.PublishedTo("out/ETKT").Count == 1 && broker.Pending("in.ETKT") == 0);
+            byte[] output = broker.PublishedTo("out/ETKT").Single().Payload.ToArray();
             var rebuilt = codec.Parse(new(metadata, output));
             var values = rebuilt.Fields.Select(field => field.Value).ToArray();
-            Check(values[0] == "K7QX2M", "PNR changed.");
+            Check(values[0] == "K7QX2M", "Booking reference changed.");
             Check(values[1] == "[PASSENGER_NAME]" && values[4] == "[PASSENGER_NAME]", "Names not anonymized.");
             Check(values[2] == "[EMAIL_ADDRESS]" && values[5] == "[EMAIL_ADDRESS]", "Emails not anonymized.");
             Check(values[3] == "[PASSENGER_ID]" && values[6] == "[PASSENGER_ID]", "Passenger IDs were not anonymized.");
@@ -138,18 +138,18 @@ try
 
             byte[] unknown = (byte[])input.Clone();
             "RULE"u8.CopyTo(unknown);
-            broker.Send("in.PNR", unknown);
-            await Wait(() => broker.PublishedTo("dlq.PNR").Count == 1 && broker.Pending("in.PNR") == 0);
-            var rejected = broker.PublishedTo("dlq.PNR").Single();
+            broker.Send("in.ETKT", unknown);
+            await Wait(() => broker.PublishedTo("dlq.ETKT").Count == 1 && broker.Pending("in.ETKT") == 0);
+            var rejected = broker.PublishedTo("dlq.ETKT").Single();
             Check(rejected.Payload.Span.SequenceEqual(unknown) && rejected.Headers.ContainsKey(MessageHeaders.RejectReason), "Rejected input was not preserved in the dead-letter queue.");
-            Check(broker.PublishedTo("out/PNR").Count == 1, "Unknown-field input was published.");
+            Check(broker.PublishedTo("out/ETKT").Count == 1, "Unknown-field input was published.");
             Console.WriteLine("PASS a protection failure rejects the entire message to the dead-letter queue without output");
 
             byte[] extra = [.. input, 0x00];
-            broker.Send("in.PNR", extra);
-            await Wait(() => broker.PublishedTo("dlq.PNR").Count == 2 && broker.Pending("in.PNR") == 0);
-            Check(broker.PublishedTo("dlq.PNR")[1].Payload.Span.SequenceEqual(extra), "Failed input was not preserved in the dead-letter queue.");
-            Check(broker.PublishedTo("out/PNR").Count == 1, "Partial parse was published.");
+            broker.Send("in.ETKT", extra);
+            await Wait(() => broker.PublishedTo("dlq.ETKT").Count == 2 && broker.Pending("in.ETKT") == 0);
+            Check(broker.PublishedTo("dlq.ETKT")[1].Payload.Span.SequenceEqual(extra), "Failed input was not preserved in the dead-letter queue.");
+            Check(broker.PublishedTo("out/ETKT").Count == 1, "Partial parse was published.");
             Console.WriteLine("PASS entire-message parsing rejects trailing bytes and keeps the failed input");
         }
         finally { cancellation.Cancel(); await running; }
@@ -173,7 +173,7 @@ finally
 #region Classes
 
 /// <summary>
-/// A test-only protector for the fixture codec: replaces names, e-mails and passenger IDs, keeps the PNR, and fails
+/// A test-only protector for the fixture codec: replaces names, e-mails and passenger IDs, keeps the booking reference, and fails
 /// closed on any other field, so worker delivery checks do not depend on detection.
 /// </summary>
 sealed class FixtureProtector : IFeedProtector
@@ -189,7 +189,7 @@ sealed class FixtureProtector : IFeedProtector
     public ValueTask<DetectionOutcome> ProtectAsync(FeedType feed, ParsedFeed parsed, CancellationToken cancellationToken) =>
         ValueTask.FromResult(new DetectionOutcome(parsed.Fields.ToDictionary(field => field.Id, field => field.Name switch
         {
-            "pnr" => field.Value,
+            "bookingReference" => field.Value,
             "name" => "[PASSENGER_NAME]",
             "email" => "[EMAIL_ADDRESS]",
             "sourcePassengerId" => "[PASSENGER_ID]",
@@ -209,7 +209,7 @@ sealed class TestOnlyCodec : IFeedCodec
     /// <summary>
     /// The ordered field names in the isolated regression-test format.
     /// </summary>
-    private static readonly string[] Names = ["pnr", "name", "email", "sourcePassengerId", "name", "email", "sourcePassengerId"];
+    private static readonly string[] Names = ["bookingReference", "name", "email", "sourcePassengerId", "name", "email", "sourcePassengerId"];
 
     #endregion
 
@@ -280,11 +280,11 @@ sealed class TestOnlyCodec : IFeedCodec
     /// <exception cref="InvalidDataException">The supplied message, field set or configuration violates the reviewed processing contract.</exception>
     public void Validate(ParsedFeed original, ReadOnlyMemory<byte> rebuilt)
     {
-        var delivery = new FeedDelivery(FeedType.PNR, Guid.Empty, "fixture.bin", "test-only");
+        var delivery = new FeedDelivery(FeedType.ETKT, Guid.Empty, "fixture.bin", "test-only");
         var check = Parse(new(delivery, rebuilt));
         if (check.Fields.Count != original.Fields.Count || check.Fields[0].Value != original.Fields[0].Value)
         {
-            throw new InvalidDataException("Invalid test-only rebuilt structure or PNR.");
+            throw new InvalidDataException("Invalid test-only rebuilt structure or booking reference.");
         }
     }
 

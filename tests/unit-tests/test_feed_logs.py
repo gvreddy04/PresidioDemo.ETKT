@@ -101,7 +101,7 @@ class DetectionLogTests(unittest.TestCase):
         cls.off = detection_log("off")
 
     def test_every_decoded_string_is_listed_once_in_its_group(self):
-        # A message dead-lettered after detection keeps its block with values (WR-020): with no PNR anchor, no recognizer
+        # A message dead-lettered after detection keeps its block with values (WR-020): with no anchor, no recognizer
         # file can force that rejection any more, so FeedPipelineChecks covers it with a codec whose rebuild check fails.
         expected = sum(int(m.group(1)) for m in re.finditer(r"^SAMPLE \S+ candidates=(\d+)", self.on, re.M))
         found = blocks(self.on)
@@ -138,16 +138,16 @@ class DetectionLogTests(unittest.TestCase):
 class FeedLogTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.original = (PROJECT / "docs/sample-docs/PNR/PNR_02.txt").read_bytes()
-        cls.harness = run({"PNR/comparison.txt": cls.original}, expect=0, prefix="feed-logs-")
+        cls.original = (PROJECT / "docs/sample-docs/ETKT/ETKT_03.txt").read_bytes()
+        cls.harness = run({"ETKT/comparison.txt": cls.original}, expect=0, prefix="feed-logs-")
         cls.addClassCleanup(cls.harness.cleanup)
 
     def test_one_log_per_transaction_with_complete_before_and_after_sections(self):
         original = self.original
-        item = self.harness.item("PNR", "comparison.txt")
+        item = self.harness.item("ETKT", "comparison.txt")
         logs = list((self.harness.output_root / "logs").rglob("*"))
         self.assertEqual([p.name for p in logs if p.is_file()], ["comparison.txt.log.txt"])
-        text = self.harness.log("PNR", "comparison.txt")
+        text = self.harness.log("ETKT", "comparison.txt")
         self.assertIn("Transaction: " + item["MessageId"], text)
         self.assertEqual(text.count("BEFORE ANONYMIZATION"), 1)
         before, after = text.split("AFTER ANONYMIZATION")
@@ -163,13 +163,13 @@ class FeedLogTests(unittest.TestCase):
         self.assertLess(before.index("Decoded MQ payload"), before.index("Plain text:"))
         self.assertLess(before.index("Plain text:"), before.index("Detection ("))
         self.assertIn(item["MessageId"] + " DETECTION PUBLISHED", before)
-        output = self.harness.published("PNR", "comparison.txt")
+        output = self.harness.published("ETKT", "comparison.txt")
         self.assertLess(after.index("Decoded MQ payload"), after.index("Complete feed data"))
         self.assertIn("Complete feed data (" + str(len(output)) + " bytes):", after)
         self.assertIn(output.decode("utf-8"), after)
 
     def test_the_file_block_carries_values(self):
-        found = blocks(self.harness.log("PNR", "comparison.txt"))
+        found = blocks(self.harness.log("ETKT", "comparison.txt"))
         self.assertEqual(len(found), 1)
         self.assertTrue(all(values_of(line)[0] is not None for _, line in found[0]["entries"]))
 
@@ -185,7 +185,7 @@ class DetectionLogValuesTests(unittest.TestCase):
         samples = PROJECT / "docs" / "sample-docs"
         inputs = {f"{p.parent.name}/{p.name}": p.read_bytes() for p in sorted(samples.rglob("*.txt"))}
         # A truncated payload is rejected before detection, so it must write no block.
-        inputs["PNR/truncated.bin"] = b"\0\0\0"
+        inputs["ETKT/truncated.bin"] = b"\0\0\0"
         cls.inputs = inputs
         cls.values = run(inputs, extra_args=["--detection-log", "values"], expect=2, prefix="detection-values-")
         cls.addClassCleanup(cls.values.cleanup)
@@ -201,7 +201,8 @@ class DetectionLogValuesTests(unittest.TestCase):
 
     def test_values_blocks_have_the_value_free_structure_plus_values(self):
         values, on = blocks(self.values.console), blocks(self.on.console)
-        self.assertGreater(sum(len(b["entries"]) for b in values), 100)
+        # The six samples hold 54 decoded strings.
+        self.assertGreaterEqual(sum(len(b["entries"]) for b in values), 54)
         self.assertEqual(self.structure(self.values), self.structure(self.on))
         for block in values:
             for group, line in block["entries"]:
@@ -226,12 +227,12 @@ class DetectionLogValuesTests(unittest.TestCase):
                 before, _ = values_of(line)
                 self.assertEqual(payload[offset:offset + len(before)].decode("ascii"), before, f"{feed} offset {offset:#x}")
                 checked += 1
-        self.assertGreater(checked, 100)
+        self.assertGreaterEqual(checked, 54)
 
     def test_messages_rejected_before_detection_write_no_block(self):
         transactions = {b["header"].group(2) for b in blocks(self.values.console)}
-        item = self.values.status("PNR", "truncated.bin", "Rejected")
-        self.assertNotIn(item["MessageId"], transactions, "PNR/truncated.bin was rejected before detection but has a block")
+        item = self.values.status("ETKT", "truncated.bin", "Rejected")
+        self.assertNotIn(item["MessageId"], transactions, "ETKT/truncated.bin was rejected before detection but has a block")
 
     def test_every_block_in_the_harness_console_parses_whole(self):
         # Every block line is indented, so any other line inside a block would end it early and its header counts would
@@ -253,7 +254,7 @@ class DetectionLogValuesTests(unittest.TestCase):
 
     def test_the_run_summary_lists_review_fields_by_slot_and_offset_without_values(self):
         summary = (self.values.output_root / "detection-summary.txt").read_text(encoding="utf-8")
-        self.assertRegex(summary, r"(?m)^PNR  review fields \(\d+ files\)$")
+        self.assertRegex(summary, r"(?m)^ETKT  review fields \(\d+ files\)$")
         entries = [line for line in summary.splitlines() if line.startswith("  ")]
         self.assertGreater(len(entries), 0)
         self.assertTrue(all(re.match(r"  slot \d+ @0x[0-9A-F]+ +\S+ +seen=\d+ ", line) for line in entries),

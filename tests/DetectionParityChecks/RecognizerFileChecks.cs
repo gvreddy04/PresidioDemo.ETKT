@@ -18,7 +18,7 @@ public static class RecognizerFileChecks
     /// </summary>
     private const string Valid = """
         <?xml version="1.0" encoding="utf-8"?>
-        <recognizers feed="PNR" language="en" default_score_threshold="0.6">
+        <recognizers feed="ETKT" language="en" default_score_threshold="0.6">
           <recognizer name="CryptoRecognizer" type="predefined" enabled="false" />
           <recognizer name="passengerName" type="custom" supported_entity="PERSON">
             <pattern name="surname/given" score="0.9">(?&lt;![A-Z])[A-Z]{2,}/[A-Z]+</pattern>
@@ -68,17 +68,17 @@ public static class RecognizerFileChecks
             Check(file.ActionFor("PERSON") is ({ Operator: AnonymizerOperator.Mask, MaskingChar: '*' }, true)
                 && file.ActionFor("CREDIT_CARD") is ({ Operator: AnonymizerOperator.Mask, MaskingChar: '#' }, false),
                 "an entity uses its own anonymizer, else DEFAULT", ref passed);
-            var bare = Load(scratch, "<recognizers feed=\"PNR\" />");
+            var bare = Load(scratch, "<recognizers feed=\"ETKT\" />");
             Check(bare.Disabled.Count == 0 && bare.Recognizers.Count == 0 && bare.Threshold == 0.5 && !bare.AllowList.MatchesWhole("1405")
                 && bare.ActionFor("PERSON") is ({ Operator: AnonymizerOperator.Replace }, false), "an empty file loads with Presidio's defaults and replace", ref passed);
-            Check(Load(scratch, "<recognizers feed=\"PNR\"><allow_list><item>FQTR</item></allow_list></recognizers>").AllowList is { Regex: false } exact
+            Check(Load(scratch, "<recognizers feed=\"ETKT\"><allow_list><item>FQTR</item></allow_list></recognizers>").AllowList is { Regex: false } exact
                 && exact.MatchesWhole("FQTR") && !exact.MatchesWhole("fqtr"), "an exact allow list compares the whole text exactly", ref passed);
             Check(file.ToBridgeJson().Contains("\"disabled\":[\"CryptoRecognizer\"]", StringComparison.Ordinal)
                 && file.ToBridgeJson().Contains("\"denyList\":[\"MR\",\"MRS\",\"DR\"]", StringComparison.Ordinal), "the bridge JSON carries switches and deny lists", ref passed);
 
-            Reject(scratch, "<recognizers feed=\"PNR\"", "not well-formed XML", ref passed);
-            Reject(scratch, "<?xml version=\"1.0\"?><!DOCTYPE r [<!ENTITY x \"y\">]><recognizers feed=\"PNR\" />", "a DTD", ref passed);
-            Reject(scratch, Valid.Replace("feed=\"PNR\"", "feed=\"OTHER\""), "the wrong feed attribute", ref passed);
+            Reject(scratch, "<recognizers feed=\"ETKT\"", "not well-formed XML", ref passed);
+            Reject(scratch, "<?xml version=\"1.0\"?><!DOCTYPE r [<!ENTITY x \"y\">]><recognizers feed=\"ETKT\" />", "a DTD", ref passed);
+            Reject(scratch, Valid.Replace("feed=\"ETKT\"", "feed=\"OTHER\""), "the wrong feed attribute", ref passed);
             Reject(scratch, Valid.Replace("language=\"en\"", "language=\"de\""), "a language other than en", ref passed);
             Reject(scratch, Valid.Replace("0.6", "1.5"), "a threshold above 1", ref passed);
             Reject(scratch, Valid.Replace("ORD\\d+", "(unclosed"), "a pattern that does not compile", ref passed);
@@ -116,13 +116,13 @@ public static class RecognizerFileChecks
     }
 
     /// <summary>
-    /// Writes the content as <c>pnr.xml</c> and reads it.
+    /// Writes the content as <c>etkt.xml</c> and reads it.
     /// </summary>
     private static RecognizerFile Load(string scratch, string content)
     {
-        string path = Path.Combine(scratch, "pnr.xml");
+        string path = Path.Combine(scratch, "etkt.xml");
         File.WriteAllText(path, content);
-        return RecognizerFileReader.Read(path, FeedType.PNR);
+        return RecognizerFileReader.Read(path, FeedType.ETKT);
     }
 
     /// <summary>
@@ -134,7 +134,7 @@ public static class RecognizerFileChecks
         {
             Load(scratch, content);
         }
-        catch (InvalidDataException ex) when (ex.Message.StartsWith("Recognizer file pnr.xml", StringComparison.Ordinal)
+        catch (InvalidDataException ex) when (ex.Message.StartsWith("Recognizer file etkt.xml", StringComparison.Ordinal)
             && (phrase is null || ex.Message.Contains(phrase, StringComparison.Ordinal)))
         {
             Console.WriteLine("PASS rejected " + label + " (" + ex.Message + ")");

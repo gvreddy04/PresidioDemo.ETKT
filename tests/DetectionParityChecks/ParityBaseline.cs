@@ -17,7 +17,8 @@ namespace PresidioDemo.DetectionParity;
 public sealed record ParityEntry(string Sample, string Feed, string Location, int Length, string Entity);
 
 /// <summary>
-/// One PNR occurrence that today's policies keep unchanged, located without its value.
+/// One PNR occurrence that today's policies keep unchanged, located without its value; in ETKT, a divide-event PNR
+/// (booking reference) after the ticket status record.
 /// </summary>
 /// <param name="Sample">The sample file name.</param>
 /// <param name="Feed">The feed folder name.</param>

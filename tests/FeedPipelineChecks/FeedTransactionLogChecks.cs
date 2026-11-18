@@ -17,13 +17,13 @@ static class FeedTransactionLogChecks
     public static void Run()
     {
         {
-            var delivery = new FeedDelivery(FeedType.PNR, Guid.NewGuid(), "same-name.bin", "fixture");
-            // A fictional binary string and its same-width mask, as the PNR feed protects it.
+            var delivery = new FeedDelivery(FeedType.ETKT, Guid.NewGuid(), "same-name.bin", "fixture");
+            // A fictional binary string and its same-width mask, as the ETKT feed protects it.
             var input = new FeedMessage(delivery, Encoding.ASCII.GetBytes("MILLER/JORDAN"));
             var result = new FeedWorkflowResult(Encoding.ASCII.GetBytes("######/######"),
                 [new("0", "0", "MILLER/JORDAN", 0)], [new("0", "0", "######/######", 0)]);
             // The harness passes the values-mode detection block; a fictional one is enough to check its place.
-            string block = "PNR 0 DETECTION PUBLISHED file=- fields=1 pii=1 non-pii=0 review=0" + Environment.NewLine + "  PII fields (changed)" + Environment.NewLine
+            string block = "ETKT 0 DETECTION PUBLISHED file=- fields=1 pii=1 non-pii=0 review=0" + Environment.NewLine + "  PII fields (changed)" + Environment.NewLine
                 + "    slot 0 @0x0000  \"MILLER/JORDAN\" -> \"######/######\"  recognizer=passengerName entity=PERSON score=0.90 operator=mask decision=changed" + Environment.NewLine;
             string text = FeedLoggers.Format(input, result, null, block);
             string[] sections = text.Split("AFTER ANONYMIZATION");

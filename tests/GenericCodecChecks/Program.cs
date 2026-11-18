@@ -16,18 +16,18 @@ while (!File.Exists(Path.Combine(project, "PresidioDemo.slnx")))
 // of four or more characters), and the frozen value-free parity baseline.
 var expectedCandidates = new Dictionary<string, int>
 {
-    ["PNR.txt"] = 89, ["PNR_02.txt"] = 32
+    ["ETKT.txt"] = 7, ["ETKT_02.txt"] = 7, ["ETKT_03.txt"] = 17, ["ETKT_04.txt"] = 7, ["ETKT_05.txt"] = 9, ["ETKT_06.txt"] = 7
 };
 using var baseline = JsonDocument.Parse(File.ReadAllText(Path.Combine(project, "tests", "fixtures", "parity-baseline.json")));
 var locations = baseline.RootElement.GetProperty("protected").EnumerateArray().Concat(baseline.RootElement.GetProperty("pnrs").EnumerateArray())
-    .Where(e => e.GetProperty("feed").GetString() == "PNR")
+    .Where(e => e.GetProperty("feed").GetString() == "ETKT")
     .Select(e => (Sample: e.GetProperty("sample").GetString()!, Offset: int.Parse(e.GetProperty("location").GetString()!), Length: e.GetProperty("length").GetInt32()))
     .ToArray();
 var samples = Directory.EnumerateFiles(Path.Combine(project, "docs", "sample-docs"), "*.txt", SearchOption.AllDirectories)
     .Order(StringComparer.Ordinal)
     .Select(path => (Path: path, Feed: FeedFileRouting.FromPath(path)))
     .ToArray();
-Check(samples.Length == 2, "2 PNR samples expected, found " + samples.Length);
+Check(samples.Length == 6, "6 ETKT samples expected, found " + samples.Length);
 
 int compared = 0;
 foreach (var (path, feed) in samples)

@@ -161,8 +161,8 @@ public static class Spike
 
     /// <summary>
     /// Measures messages per second for one process (one ECS task) with spaCy NER on, and the task count that sustains
-    /// the PNR feed's sizing peak of 400 messages per second (its share of the 2,000 messages per second sized for the
-    /// airline feeds before this branch kept PNR only).
+    /// the ETKT feed's sizing peak of 400 messages per second (its equal share of the 2,000 messages per second sized
+    /// for the five airline feeds before this worker kept ETKT only).
     /// </summary>
     private static async Task<object> Throughput(DetectingFeedProtector protector, IReadOnlyList<string> samples, int rounds)
     {
@@ -199,7 +199,7 @@ public static class Spike
             MessagesPerSecondPerTask = Math.Round(messages / total.Elapsed.TotalSeconds, 1),
             Feeds = rows,
             TasksForPeak = rows.Sum(r => r.Tasks),
-            Assumption = "400 msg/s peak for the PNR feed; one worker process per ECS task"
+            Assumption = "400 msg/s peak for the ETKT feed; one worker process per ECS task"
         };
     }
 

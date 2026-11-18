@@ -8,7 +8,7 @@ import json
 
 PROJECT = Path(__file__).resolve().parents[2]
 FIXTURES = PROJECT / "tests" / "fixtures"
-# No supplied PNR sample is a negative test; a negative sample added later is listed here with its expected reason.
+# No supplied ETKT sample is a negative test; a negative sample added later is listed here with its expected reason.
 EXPECTED_REJECTIONS = {}
 
 

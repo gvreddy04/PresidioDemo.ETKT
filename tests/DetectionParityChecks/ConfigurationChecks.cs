@@ -4,7 +4,7 @@ using PresidioDemo.Core.Protection;
 namespace PresidioDemo.DetectionParity;
 
 /// <summary>
-/// Checks the shipped recognizer file (WR-014): it loads, declares the PNR feed's custom recognizers, and every entity type
+/// Checks the shipped recognizer file (WR-014): it loads, declares the ETKT feed's custom recognizers, and every entity type
 /// of the frozen baseline is covered by a custom recognizer or by a Presidio predefined entity.
 /// </summary>
 public static class ConfigurationChecks
@@ -35,20 +35,21 @@ public static class ConfigurationChecks
         string directory = Path.Combine(root, "src", "PresidioDemo.Core", "Configuration", "recognizers");
         var files = RecognizerFileReader.ReadAll(directory);
         int passed = 0;
-        Check(files.Count == FeedCatalog.All.Count && files.ContainsKey(FeedType.PNR), "the PNR recognizer file loads", ref passed);
-        var pnr = files[FeedType.PNR];
-        Check(pnr.Recognizers.Any(r => r.Entity == "DATE_OF_BIRTH") && pnr.Recognizers.Any(r => r.Entity == "PERSON"),
-            "date-of-birth and passenger-name recognizers are declared", ref passed);
-        Check(pnr.Anonymizers.ContainsKey(FeedAnonymizer.DefaultEntity), "the shipped file sets a DEFAULT anonymizer", ref passed);
+        Check(files.Count == FeedCatalog.All.Count && files.ContainsKey(FeedType.ETKT), "the ETKT recognizer file loads", ref passed);
+        var etkt = files[FeedType.ETKT];
+        Check(etkt.Recognizers.Any(r => r.Entity == "TICKET_REFERENCE") && etkt.Recognizers.Any(r => r.Entity == "UNCLASSIFIED_IDENTIFIER")
+            && etkt.Recognizers.Any(r => r.Entity == "PERSON"),
+            "ticket-number, status-prefix and passenger-name recognizers are declared", ref passed);
+        Check(etkt.Anonymizers.ContainsKey(FeedAnonymizer.DefaultEntity), "the shipped file sets a DEFAULT anonymizer", ref passed);
         var baseline = ParityBaseline.Load(root);
         var uncovered = UncoveredEntities(baseline, files);
         Check(uncovered.Count == 0, "every baseline entity has a custom recognizer or a Presidio predefined entity"
             + (uncovered.Count == 0 ? "" : ": missing " + string.Join(", ", uncovered)), ref passed);
-        var withoutDateOfBirth = new Dictionary<FeedType, RecognizerFile>(files)
+        var withoutTicketNumber = new Dictionary<FeedType, RecognizerFile>(files)
         {
-            [FeedType.PNR] = pnr with { Recognizers = pnr.Recognizers.Where(r => r.Entity != "DATE_OF_BIRTH").ToArray() },
+            [FeedType.ETKT] = etkt with { Recognizers = etkt.Recognizers.Where(r => r.Entity != "TICKET_REFERENCE").ToArray() },
         };
-        Check(UncoveredEntities(baseline, withoutDateOfBirth).Contains("PNR DATE_OF_BIRTH"),
+        Check(UncoveredEntities(baseline, withoutTicketNumber).Contains("ETKT TICKET_REFERENCE"),
             "the coverage check reports a baseline entity removed from its feed's file", ref passed);
         return passed;
     }
