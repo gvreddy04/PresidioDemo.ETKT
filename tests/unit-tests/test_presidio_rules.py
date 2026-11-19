@@ -90,13 +90,13 @@ class DetectionBridgeTests(unittest.TestCase):
         self.assertEqual((status, thirteen, fifteen), ([], [], []), "names-only: a status reference prefix and ticket numbers are not detected")
 
     def test_default_detection_off_with_recognizers_runs_only_the_defined_ones(self):
-        mixed, guess = spans("ETKT", "CTCEDAHK1 alex@example.com 1MILLER/JORDAN", "Contact Alex Sample in Paris")
+        mixed, guess = spans("ETKT", "CTCEDAHK1 alex@example.com -1MILLER/JORDAN", "Contact Alex Sample in Paris")
         self.assertEqual(mixed, [("PERSON", "MILLER/JORDAN", "passengerName")],
                          "the made-up email stays undetected; the SURNAME/GIVEN name is found")
         self.assertEqual(guess, [], "no spaCy PERSON or LOCATION guess runs")
 
     def test_default_detection_on_with_recognizers_runs_both(self):
-        found = spans("ShippedOn", "CTCEDAHK1 alex@example.com 1MILLER/JORDAN")[0]
+        found = spans("ShippedOn", "CTCEDAHK1 alex@example.com -1MILLER/JORDAN")[0]
         self.assertIn(("EMAIL_ADDRESS", "alex@example.com", "EmailRecognizer"), found)
         self.assertIn(("PERSON", "MILLER/JORDAN", "passengerName"), found)
 
@@ -172,13 +172,13 @@ class DetectionBridgeTests(unittest.TestCase):
         self.assertIn("passengerName", [n for e, t, n in spans("ETKT", "MILLER/JORDAN")[0]], "the next call works normally")
 
     def test_offsets_are_utf16_so_dotnet_masks_the_right_characters(self):
-        text = "\U0001F600 CONTACT MILLER/JORDAN"
+        text = "\U0001F600-1MILLER/JORDAN"
         found = json.loads(presidio_demo.analyze_strings("ETKT", json.dumps([text])))[0]
         name = [span for span in found if span[4] == "passengerName"][0]
         utf16 = text.encode("utf-16-le")
-        # The name pattern allows spaces, so the match starts at CONTACT, right after the emoji (two UTF-16 units) and a space.
-        self.assertEqual(name[0], 3)
-        self.assertEqual(utf16[name[0] * 2:name[1] * 2].decode("utf-16-le"), "CONTACT MILLER/JORDAN")
+        # The passenger reference -1 follows the emoji (two UTF-16 units), so the name starts at UTF-16 offset 4.
+        self.assertEqual(name[0], 4)
+        self.assertEqual(utf16[name[0] * 2:name[1] * 2].decode("utf-16-le"), "MILLER/JORDAN")
 
     def test_batch_keeps_one_result_per_string_and_rejects_bad_input(self):
         self.assertEqual(len(spans("ETKT", "20261005", "MILLER/JORDAN", "")), 3)

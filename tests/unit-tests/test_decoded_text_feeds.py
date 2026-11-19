@@ -63,7 +63,7 @@ class DecodedTextFeedTests(unittest.TestCase):
             self.assertIn(reason, rejected[name])
 
     def test_published_samples_keep_framing_and_protect_every_baseline_name(self):
-        # Names-only: every PERSON baseline value is protected or approved; every other value is out of scope.
+        # Every baseline value in scope is protected or approved; the rest is out of scope.
         document, exceptions = baseline()
         totals = {"protected": 0, "approved_exceptions": 0, "out_of_scope": 0}
         for key, original in self.inputs.items():

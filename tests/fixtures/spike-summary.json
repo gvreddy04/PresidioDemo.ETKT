@@ -1,10 +1,10 @@
 {
   "parity": "PASS",
-  "scope": "names-only: only baseline values whose entity is PERSON are checked",
+  "scope": "baseline values whose entity a recognizer defined in the feed\u0027s file produces: PERSON",
   "defaultDetection": false,
   "protected": {
     "baseline": 30,
-    "namesInScope": 0,
+    "inScope": 0,
     "outOfScope": 30,
     "caught": 0,
     "missed": 0,
@@ -22,11 +22,11 @@
     "rounds": 20,
     "messages": 120,
     "nlpNer": "off (Presidio:DefaultDetection false); spaCy does not run (no context words)",
-    "messagesPerSecondPerTask": 2162,
+    "messagesPerSecondPerTask": 1605.7,
     "feeds": [
       {
         "feed": "ETKT",
-        "messagesPerSecondPerTask": 2191.5,
+        "messagesPerSecondPerTask": 1624.1,
         "tasks": 1
       }
     ],

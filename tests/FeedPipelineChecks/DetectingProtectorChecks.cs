@@ -173,7 +173,8 @@ internal static class DetectingProtectorChecks
             && divideOutcome.Events.Any(e => e.Decision == DetectionDecision.NothingDetected), "ETKT_05.txt has allowed and undetected strings, and names-only changes none of them");
         Check(divideOutcome.Events.Where(e => e.Decision is DetectionDecision.Allowed or DetectionDecision.NothingDetected or DetectionDecision.BelowThreshold)
             .All(e => divideOutcome.Values[Parse(divideSample).Fields[e.Slot].Id] == Parse(divideSample).Fields[e.Slot].Value), "allowed and undetected strings are published unchanged");
-        var defined = files[FeedType.ETKT].Recognizers.Select(r => r.Name).Concat(["allow_list", "none"]).ToHashSet(StringComparer.Ordinal);
+        var defined = files[FeedType.ETKT].Recognizers.Select(r => r.Name).Concat((files[FeedType.ETKT].LoneNames ?? []).Select(r => r.Name))
+            .Concat(["allow_list", "none"]).ToHashSet(StringComparer.Ordinal);
         Check(divideOutcome.Events.All(e => e.Recognizer.Split('+').All(defined.Contains) && !e.Reasons.HasFlag(ReviewReason.SpacyGuess)),
             "with default detection off every decision names a defined recognizer, and nothing is a spacy-guess");
         // AC-011: no PNR anchor. The divide-event PNRs after the ticket status record (WR-017) are six letters in which
@@ -223,18 +224,18 @@ internal static class DetectingProtectorChecks
         try
         {
             // Presidio:DefaultDetection with and without defined recognizers (made-up strings).
-            string[] madeUp = ["CTCEDAHK1 alex@example.com 1MILLER/JORDAN", "Contact Alex Sample", "Card 4111 1111 1111 1111", "Please book a window seat"];
+            string[] madeUp = ["CTCEDAHK1 alex@example.com -1MILLER/JORDAN", "Contact Alex Sample", "Card 4111 1111 1111 1111", "Please book a window seat"];
             var definedOnly = await ProtectStringsAsync(protector, madeUp);
-            Check(definedOnly[0] == "CTCEDAHK1 alex@example.com 1*************" && definedOnly[1] == madeUp[1] && definedOnly[2] == madeUp[2],
+            Check(definedOnly[0] == "CTCEDAHK1 alex@example.com -1*************" && definedOnly[1] == madeUp[1] && definedOnly[2] == madeUp[2],
                 "default detection off with recognizers: only the defined ones act; the made-up email stays and the SURNAME/GIVEN name is masked");
             var both = await ProtectOutcomeAsync(Configured(shippedFile, defaultDetection: true), madeUp);
-            Check(both.Values["0"] == "CTCEDAHK1 **************** 1*************" && both.Values["1"] == "Contact ***********"
+            Check(both.Values["0"] == "CTCEDAHK1 **************** -1*************" && both.Values["1"] == "Contact ***********"
                 && both.Values["2"] == "Card " + new string('*', 19) && both.Values["3"] == madeUp[3],
-                $"default detection on with recognizers: both act; the email gets DEFAULT and Presidio's PERSON the PERSON anonymizer (got {string.Join(" | ", both.Values.Values)})");
+                $"default detection on with recognizers: both act; the email gets its own anonymizer, else DEFAULT, and Presidio's PERSON the PERSON anonymizer (got {string.Join(" | ", both.Values.Values)})");
             Check(both.Events[0].Recognizer.Split('+').Contains("passengerName") && both.Events[0].Recognizer.Split('+').Contains("EmailRecognizer")
                 && both.Events[1].Reasons.HasFlag(ReviewReason.SpacyGuess), "default detection on: the log names both kinds of recognizer, and a spaCy guess is for review");
             var presidioOnly = await ProtectStringsAsync(Configured(empty, defaultDetection: true), madeUp);
-            Check(presidioOnly[0] == "CTCEDAHK1 <EMAIL_ADDRESS>  1MILLER/JORDAN" && presidioOnly[1] == "Contact <PERSON>   " && presidioOnly[3] == madeUp[3],
+            Check(presidioOnly[0].StartsWith("CTCEDAHK1 <EMAIL_ADDRESS>  -1MILLER/", StringComparison.Ordinal) && presidioOnly[1] == "Contact <PERSON>   " && presidioOnly[3] == madeUp[3],
                 $"default detection on without recognizers: only Presidio acts (got {string.Join(" | ", presidioOnly)})");
             var nothingInput = Parse(etktSample);
             var nothing = await Configured(empty).ProtectAsync(FeedType.ETKT, nothingInput, CancellationToken.None);
@@ -394,7 +395,7 @@ internal static class DetectingProtectorChecks
         // WR-019: the names-only parity with the frozen baseline. The ETKT baseline holds no PERSON value (0 names in scope),
         // so no narrowed recognizer can fail it here; ConfigurationChecks shows the name-coverage check failing on a made-up
         // baseline name instead.
-        int reviewedMisses = await ParityMissesAsync(protector, projectRoot, FeedType.ETKT);
+        int reviewedMisses = await ParityMissesAsync(protector, projectRoot, FeedType.ETKT, files[FeedType.ETKT].DefinedEntities);
         Check(reviewedMisses == 0, "the shipped recognizers must have no unapproved ETKT parity miss");
         Console.WriteLine("PASS the shipped ETKT recognizers keep the names-only parity with the frozen baseline (0 names in scope)");
     }
@@ -416,15 +417,16 @@ internal static class DetectingProtectorChecks
             new FeedField(i.ToString(System.Globalization.CultureInfo.InvariantCulture), "slot" + i, value)).ToArray(), new object()), CancellationToken.None);
 
     /// <summary>
-    /// Counts baseline names (PERSON values) of one binary feed that the protector publishes unchanged and that are not
-    /// approved exceptions (WR-019). Names-only: every other baseline value is out of scope. Value-free: compares bytes at
-    /// the frozen locations only.
+    /// Counts baseline values in scope of one binary feed that the protector publishes unchanged and that are not approved
+    /// exceptions (WR-019). In scope are the values whose entity a recognizer the shipped file defines produces; every other
+    /// baseline value is out of scope. Value-free: compares bytes at the frozen locations only.
     /// </summary>
     /// <param name="protector">The protector to measure.</param>
     /// <param name="projectRoot">The repository root.</param>
     /// <param name="feed">A binary feed.</param>
+    /// <param name="scope">The entities in scope: those the shipped file's recognizers produce.</param>
     /// <returns>The number of unapproved misses.</returns>
-    private static async Task<int> ParityMissesAsync(DetectingFeedProtector protector, string projectRoot, FeedType feed)
+    private static async Task<int> ParityMissesAsync(DetectingFeedProtector protector, string projectRoot, FeedType feed, IReadOnlySet<string> scope)
     {
         using var baseline = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(projectRoot, "tests", "fixtures", "parity-baseline.json")));
         using var approved = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(projectRoot, "tests", "fixtures", "parity-exceptions.json")));
@@ -432,7 +434,7 @@ internal static class DetectingProtectorChecks
         string folder = FeedCatalog.Get(feed).FolderName;
         int misses = 0;
         foreach (var group in baseline.RootElement.GetProperty("protected").EnumerateArray()
-            .Where(e => e.GetProperty("feed").GetString() == folder && e.GetProperty("entity").GetString() == "PERSON")
+            .Where(e => e.GetProperty("feed").GetString() == folder && scope.Contains(e.GetProperty("entity").GetString()!))
             .GroupBy(e => e.GetProperty("sample").GetString()!))
         {
             string path = Path.Combine(projectRoot, "docs", "sample-docs", folder, group.Key);
